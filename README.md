@@ -266,3 +266,9 @@ specs/logwatch/             # requirements, design, tasks
 
 [AGENTS.md](AGENTS.md) has every check and test command and the conventions
 for changing the code.
+
+## License
+
+[MIT](LICENSE), copyright 2026 Code Craft AI LLC. The Loup skill in
+[`skills/loup-programmer/`](skills/loup-programmer/) is copied from the Loup
+project and is not covered by this license; it keeps the Loup project's terms.
