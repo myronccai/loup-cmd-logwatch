@@ -1,0 +1,238 @@
+@mode(host.dual)
+
+# Turns the counters into report tables. A table is plain data (column
+# names and typed cells), so the text, CSV and JSON renderers share it.
+
+from .stats import (Stats, Tally, Minute);
+
+pub let REPORT_NAMES: list[string] = ["summary", "paths", "status", "hourly", "clients", "bursts"];
+
+# One value in a report. Tenths holds a number with one decimal place, ten
+# times over (a percentage of 33.3 is Tenths(333)).
+pub enum Cell {
+    Text(value: string),
+    Count(value: int),
+    Tenths(value: int),
+}
+
+pub struct Table {
+    pub name: string;
+    pub title: string;
+    pub columns: list[string];
+    pub rows: list[list[Cell]];
+    # The summary: every row is a (field, value) pair.
+    pub keyed: bool;
+    # The column that gets a bar in text output, or -1.
+    pub bar: int;
+}
+
+# `part` as a percentage of `whole`, in tenths, rounded half up.
+pub func percent_tenths(part: int, whole: int): int {
+    if (whole <= 0) {
+        return 0;
+    }
+    return (part * 2000 + whole) / (2 * whole);
+}
+
+func text(s: string): Cell {
+    return Cell.Text(value = s);
+}
+
+func count(n: int): Cell {
+    return Cell.Count(value = n);
+}
+
+func share(part: int, whole: int): Cell {
+    return Cell.Tenths(value = percent_tenths(part, whole));
+}
+
+func compare_text(a: string, b: string): int {
+    return if (a < b) { -1 } else if (a > b) { 1 } else { 0 };
+}
+
+pub func summary_table(s: Stats): Table {
+    var client_errors = 0;
+    var server_errors = 0;
+    for (h in s.hours) {
+        client_errors += h.client_errors;
+        server_errors += h.server_errors;
+    }
+    let rows = [
+        [text("files"), count(s.files)],
+        [text("lines"), count(s.lines)],
+        [text("requests"), count(s.requests)],
+        [text("malformed"), count(s.malformed)],
+        [text("combined"), count(s.combined)],
+        [text("first"), text(s.first)],
+        [text("last"), text(s.last)],
+        [text("bytes"), count(s.bytes)],
+        [text("clients"), count(s.clients.len())],
+        [text("paths"), count(s.paths.len())],
+        [text("4xx"), count(client_errors)],
+        [text("5xx"), count(server_errors)],
+    ];
+    return Table(name = "summary", title = "Summary", columns = ["field", "value"], rows = rows, keyed = true, bar = -1);
+}
+
+# The `n` keys with the most requests, ties broken alphabetically.
+pub func top_keys(tallies: dict[string, Tally], n: int): list[string] {
+    var keys = tallies.keys();
+    keys.sort(func(a: string, b: string): int {
+        let diff = tallies[b].requests - tallies[a].requests;
+        return if (diff != 0) { diff } else { compare_text(a, b) };
+    });
+    return if (keys.len() > n) { keys.slice(0, n) } else { keys };
+}
+
+func tally_table(name: string, noun: string, key_column: string, tallies: dict[string, Tally], total: int, n: int): Table {
+    let keys = top_keys(tallies, n);
+    var rows: list[list[Cell]] = [];
+    var rank = 0;
+    for (k in keys) {
+        rank += 1;
+        let t = tallies[k];
+        rows.push([count(rank), text(k), count(t.requests), share(t.requests, total), count(t.bytes), count(t.client_errors), count(t.server_errors)]);
+    }
+    return Table(
+        name = name,
+        title = i"Top {$ noun $} ({$ keys.len() $} of {$ tallies.len() $})",
+        columns = ["rank", key_column, "requests", "percent", "bytes", "4xx", "5xx"],
+        rows = rows,
+        keyed = false,
+        bar = -1,
+    );
+}
+
+pub func paths_table(s: Stats, n: int): Table {
+    return tally_table("paths", "paths", "path", s.paths, s.requests, n);
+}
+
+pub func clients_table(s: Stats, n: int): Table {
+    return tally_table("clients", "clients", "client", s.clients, s.requests, n);
+}
+
+# Each status class (`2xx`) followed by its codes, in ascending order.
+pub func status_table(s: Stats): Table {
+    var codes = s.statuses.keys();
+    codes.sort(func(a: int, b: int): int { return a - b; });
+    var rows: list[list[Cell]] = [];
+    for (class_digit in 1..6) {
+        var class_total = 0;
+        for (code in codes) {
+            if (code / 100 == class_digit) {
+                class_total += s.statuses[code];
+            }
+        }
+        if (class_total == 0) {
+            continue;
+        }
+        rows.push([text(i"{$ class_digit $}xx"), count(class_total), share(class_total, s.requests)]);
+        for (code in codes) {
+            if (code / 100 == class_digit) {
+                rows.push([text(str(code)), count(s.statuses[code]), share(s.statuses[code], s.requests)]);
+            }
+        }
+    }
+    return Table(name = "status", title = "Status codes", columns = ["status", "requests", "percent"], rows = rows, keyed = false, bar = -1);
+}
+
+pub func hourly_table(s: Stats): Table {
+    var rows: list[list[Cell]] = [];
+    var hour = 0;
+    for (t in s.hours) {
+        rows.push([count(hour), count(t.requests), share(t.requests, s.requests), count(t.client_errors), count(t.server_errors)]);
+        hour += 1;
+    }
+    return Table(name = "hourly", title = "Requests by hour", columns = ["hour", "requests", "percent", "4xx", "5xx"], rows = rows, keyed = false, bar = 1);
+}
+
+# The path with the most errors in `counts`, ties broken alphabetically.
+func top_error_path(counts: dict[string, int]): string {
+    var best = "";
+    var best_count = 0;
+    for (path in counts.keys()) {
+        let n = counts[path];
+        if (n > best_count or (n == best_count and compare_text(path, best) < 0)) {
+            best = path;
+            best_count = n;
+        }
+    }
+    return best;
+}
+
+# Runs of consecutive minutes in which every minute has at least
+# `threshold` errors.
+pub func bursts_table(s: Stats, threshold: int): Table {
+    var keys = s.minutes.keys();
+    keys.sort(func(a: int, b: int): int { return a - b; });
+    var rows: list[list[Cell]] = [];
+
+    var open = false;
+    var previous = 0;
+    var start = "";
+    var end = "";
+    var minutes = 0;
+    var errors = 0;
+    var requests = 0;
+    var paths: dict[string, int] = {};
+    # One pass over the minutes plus a sentinel that closes the last run.
+    for (i in 0..(keys.len() + 1)) {
+        let hot = i < keys.len() and s.minutes[keys[i]].errors >= threshold;
+        let joins = hot and open and keys[i] == previous + 1;
+        if (open and !joins) {
+            rows.push([text(start), text(end), count(minutes), count(errors), count(requests), text(top_error_path(paths))]);
+            open = false;
+        }
+        if (!hot) {
+            continue;
+        }
+        let m = s.minutes[keys[i]];
+        if (!open) {
+            open = true;
+            start = m.label;
+            minutes = 0;
+            errors = 0;
+            requests = 0;
+            paths = {};
+        }
+        end = m.label;
+        previous = keys[i];
+        minutes += 1;
+        errors += m.errors;
+        requests += m.requests;
+        for (path in m.error_paths.keys()) {
+            paths[path] = (paths.get(path) ?? 0) + m.error_paths[path];
+        }
+    }
+
+    let kind = if (s.error_min <= 400) { "4xx/5xx" } else { "5xx" };
+    return Table(
+        name = "bursts",
+        title = i"Error bursts ({$ threshold $}+ {$ kind $} a minute)",
+        columns = ["start", "end", "minutes", "errors", "requests", "top_path"],
+        rows = rows,
+        keyed = false,
+        bar = -1,
+    );
+}
+
+# The tables for the named reports, in the order given.
+pub func build_reports(s: Stats, names: list[string], top: int, threshold: int): list[Table] {
+    var tables: list[Table] = [];
+    for (name in names) {
+        if (name == "summary") {
+            tables.push(summary_table(s));
+        } else if (name == "paths") {
+            tables.push(paths_table(s, top));
+        } else if (name == "status") {
+            tables.push(status_table(s));
+        } else if (name == "hourly") {
+            tables.push(hourly_table(s));
+        } else if (name == "clients") {
+            tables.push(clients_table(s, top));
+        } else if (name == "bursts") {
+            tables.push(bursts_table(s, threshold));
+        }
+    }
+    return tables;
+}

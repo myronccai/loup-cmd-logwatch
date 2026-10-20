@@ -1,0 +1,167 @@
+@mode(host.dual)
+
+# Text and CSV output of report tables. (JSON is in render_json.lpscr.)
+
+from data.csv import (write);
+from system.text import (padStart, padEnd);
+from .reports import (Cell, Table);
+
+const BAR_WIDTH: int = 40;
+
+# `333` → `33.3`.
+pub func format_tenths(tenths: int): string {
+    return i"{$ tenths / 10 $}.{$ tenths % 10 $}";
+}
+
+# A cell as text: a Tenths value gets a `%` sign when `percent_sign` is set.
+pub func cell_text(c: Cell, percent_sign: bool): string {
+    match c {
+        Cell.Text(v) => {
+            return v;
+        },
+        Cell.Count(v) => {
+            return str(v);
+        },
+        Cell.Tenths(v) => {
+            return if (percent_sign) { format_tenths(v) + "%" } else { format_tenths(v) };
+        },
+    }
+}
+
+func is_number(c: Cell): bool {
+    match c {
+        Cell.Text(v) => {
+            return false;
+        },
+        _ => {
+            return true;
+        },
+    }
+}
+
+func cell_count(c: Cell): int {
+    match c {
+        Cell.Count(v) => {
+            return v;
+        },
+        _ => {
+            return 0;
+        },
+    }
+}
+
+func trim_end(s: string): string {
+    var end = s.len();
+    while (end > 0 and s.slice(end - 1, end) == " ") {
+        end -= 1;
+    }
+    return s.slice(0, end);
+}
+
+# `n` of `most` as a bar of up to BAR_WIDTH `#`; any non-zero n gets one.
+pub func bar(n: int, most: int): string {
+    if (n <= 0 or most <= 0) {
+        return "";
+    }
+    return "#".repeat((n * BAR_WIDTH + most - 1) / most);
+}
+
+# Cells padded to their column widths, numbers on the right.
+func aligned(texts: list[string], widths: list[int], right: list[bool]): string {
+    var line = "";
+    for (col in 0..texts.len()) {
+        let s = texts[col];
+        line += "  " + (if (right[col]) { padStart(s, widths[col], " ") } else { padEnd(s, widths[col], " ") });
+    }
+    return line;
+}
+
+# One table as text: a title, then aligned columns (numbers to the right;
+# the summary, a keyed table, has no header and keeps values on the left).
+pub func table_text(t: Table): string {
+    var lines: list[string] = [t.title];
+    if (t.rows.len() == 0) {
+        lines.push("  (none)");
+        return lines.join("\n");
+    }
+
+    var cells: list[list[string]] = [];
+    for (row in t.rows) {
+        var texts: list[string] = [];
+        for (c in row) {
+            texts.push(cell_text(c, true));
+        }
+        cells.push(texts);
+    }
+
+    var widths: list[int] = [];
+    var right: list[bool] = [];
+    for (col in 0..t.columns.len()) {
+        var w = if (t.keyed) { 0 } else { t.columns[col].len() };
+        for (texts in cells) {
+            if (texts[col].len() > w) {
+                w = texts[col].len();
+            }
+        }
+        widths.push(w);
+        right.push(!t.keyed and is_number(t.rows[0][col]));
+    }
+
+    var most = 0;
+    if (t.bar >= 0) {
+        for (row in t.rows) {
+            if (cell_count(row[t.bar]) > most) {
+                most = cell_count(row[t.bar]);
+            }
+        }
+    }
+
+    if (!t.keyed) {
+        lines.push(trim_end(aligned(t.columns, widths, right)));
+    }
+    for (r in 0..t.rows.len()) {
+        var line = aligned(cells[r], widths, right);
+        if (t.bar >= 0) {
+            line += " " + bar(cell_count(t.rows[r][t.bar]), most);
+        }
+        lines.push(trim_end(line));
+    }
+    return lines.join("\n");
+}
+
+# All tables as text, a blank line between them, ending with a newline.
+pub func render_text(tables: list[Table]): string {
+    var parts: list[string] = [];
+    for (t in tables) {
+        parts.push(table_text(t));
+    }
+    return parts.join("\n\n") + "\n";
+}
+
+# One table as CSV: a header row, then the rows, each starting with the
+# report name.
+pub func table_csv(t: Table): string {
+    var rows: list[list[string]] = [];
+    var header: list[string] = ["report"];
+    for (c in t.columns) {
+        header.push(c);
+    }
+    rows.push(header);
+    for (row in t.rows) {
+        var fields: list[string] = [t.name];
+        for (c in row) {
+            fields.push(cell_text(c, false));
+        }
+        rows.push(fields);
+    }
+    return write(rows, ",");
+}
+
+# All tables as CSV, a blank line between them, ending with a newline.
+pub func render_csv(tables: list[Table]): string {
+    var parts: list[string] = [];
+    for (t in tables) {
+        parts.push(table_csv(t));
+    }
+    return parts.join("\n\n") + "\n";
+}

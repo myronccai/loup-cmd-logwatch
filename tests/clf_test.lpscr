@@ -1,0 +1,141 @@
+@mode(host.scripted)
+
+from debug.assert import (expect, expectEq);
+from ..lib.clf import (ClfParser, Entry, Stamp, path_of, closing_quote, unescape, escape, days_from_civil, minute_index, minute_label, make_stamp, format_entry);
+
+let COMMON = "127.0.0.1 - frank [10/Oct/2000:13:55:36 -0700] \"GET /apache_pb.gif HTTP/1.0\" 200 2326";
+let COMBINED = "192.0.2.10 - - [10/Oct/2026:14:00:30 +0200] \"GET /a?b=1 HTTP/1.1\" 503 - \"https://www.example.com/\" \"Mozilla/5.0 \\\"Quoted\\\" Agent\"";
+
+func parse(line: string): Result[Entry, string] {
+    let p = ClfParser();
+    var r: Result[Entry, string] = Err("not run");
+    safe {
+        r = p.parse(line);
+    }
+    return r;
+}
+
+func reason(line: string): string {
+    return match parse(line) {
+        Ok(e) => "parsed",
+        Err(msg) => msg,
+    };
+}
+
+func test_common_line(): void {
+    let e = parse(COMMON).unwrap();
+    expectEq(e.host, "127.0.0.1", "host");
+    expectEq(e.ident, "-", "ident");
+    expectEq(e.user, "frank", "user");
+    expectEq(e.stamp.text, "10/Oct/2000:13:55:36 -0700", "timestamp text");
+    expectEq(e.stamp.year, 2000, "year");
+    expectEq(e.stamp.month, 10, "month");
+    expectEq(e.stamp.day, 10, "day");
+    expectEq(e.stamp.hour, 13, "hour");
+    expectEq(e.stamp.minute, 55, "minute");
+    expectEq(e.stamp.second, 36, "second");
+    expectEq(e.stamp.zone, "-0700", "zone");
+    expectEq(e.method, "GET", "method");
+    expectEq(e.path, "/apache_pb.gif", "path");
+    expectEq(e.protocol, "HTTP/1.0", "protocol");
+    expectEq(e.status, 200, "status");
+    expectEq(e.bytes, 2326, "bytes");
+    expect(!e.combined, "common format");
+}
+
+func test_combined_line_with_escaped_quotes(): void {
+    let e = parse(COMBINED).unwrap();
+    expect(e.combined, "combined format");
+    expectEq(e.referer, "https://www.example.com/", "referer");
+    expectEq(e.agent, "Mozilla/5.0 \"Quoted\" Agent", "agent keeps the quotes");
+    expectEq(e.target, "/a?b=1", "target");
+    expectEq(e.path, "/a", "path drops the query");
+    expectEq(e.bytes, 0, "a dash is zero bytes");
+}
+
+func test_dash_request_is_kept_under_path_dash(): void {
+    let e = parse("198.51.100.7 - - [10/Oct/2026:11:30:00 +0200] \"-\" 408 -").unwrap();
+    expectEq(e.method, "-", "method");
+    expectEq(e.path, "-", "path");
+    expectEq(e.status, 408, "status");
+}
+
+func test_request_without_protocol(): void {
+    let e = parse("h - - [10/Oct/2026:11:30:00 +0000] \"GET /old\" 200 1").unwrap();
+    expectEq(e.path, "/old", "path");
+    expectEq(e.protocol, "", "no protocol");
+}
+
+func test_trailing_fields_are_ignored(): void {
+    let e = parse(COMMON + " \"-\" \"curl/8.9.1\" 0.042").unwrap();
+    expectEq(e.agent, "curl/8.9.1", "agent");
+}
+
+func test_malformed_lines_give_a_reason(): void {
+    expectEq(reason("garbage"), "expected HOST IDENT USER [TIME] \"REQUEST\" STATUS BYTES", "one word");
+    expectEq(reason("this line is not a log line"), "missing [timestamp]", "no brackets");
+    expectEq(reason("h - - [10/Oct/2026:31:00:00 +0000] \"GET / HTTP/1.1\" 200 1"), "bad timestamp '10/Oct/2026:31:00:00 +0000'", "hour 31");
+    expectEq(reason("h - - [10/Foo/2026:11:00:00 +0000] \"GET / HTTP/1.1\" 200 1"), "bad timestamp '10/Foo/2026:11:00:00 +0000'", "month");
+    expectEq(reason("h - - [2026-10-10 11:00:00] \"GET / HTTP/1.1\" 200 1"), "bad timestamp '2026-10-10 11:00:00'", "ISO time");
+    expectEq(reason("h - - [10/Oct/2026:11:00:00 +0000] GET / 200 1"), "missing \"request\"", "unquoted request");
+    expectEq(reason("h - - [10/Oct/2026:11:00:00 +0000] \"GET / 200 1"), "unterminated \"request\"", "open quote");
+    expectEq(reason("h - - [10/Oct/2026:11:00:00 +0000] \"GET /\" 2000 1"), "bad status '2000'", "four digits");
+    expectEq(reason("h - - [10/Oct/2026:11:00:00 +0000] \"GET /\" 099 1"), "bad status '099'", "below 100");
+    expectEq(reason("h - - [10/Oct/2026:11:00:00 +0000] \"GET /\" 200 12a"), "bad byte count '12a'", "bytes");
+    expectEq(reason("h - - [10/Oct/2026:11:00:00 +0000] \"GET /\" 200"), "missing status or byte count", "no bytes");
+    expectEq(reason("h - - [10/Oct/2026:11:00:00 +0000] \"GET /\" 200 1 \"-\""), "missing \"user-agent\"", "referer only");
+}
+
+func test_parser_reuses_its_matches(): void {
+    let p = ClfParser();
+    var first: Result[Entry, string] = Err("");
+    var second: Result[Entry, string] = Err("");
+    safe {
+        first = p.parse(COMMON);
+        second = p.parse(COMMON.replace("frank", "anna"));
+    }
+    expectEq(first.unwrap().stamp.minute, 55, "first parse");
+    expectEq(second.unwrap().user, "anna", "second parse");
+    expectEq(second.unwrap().stamp.minute, 55, "cached timestamp");
+}
+
+func test_path_of(): void {
+    expectEq(path_of("/a/b?x=1&y=2"), "/a/b", "query");
+    expectEq(path_of("/doc#part"), "/doc", "fragment");
+    expectEq(path_of("?only=query"), "/", "empty path");
+    expectEq(path_of("/plain"), "/plain", "plain");
+}
+
+func test_closing_quote_skips_escaped_quotes(): void {
+    expectEq(closing_quote("abc\" rest"), 3, "plain");
+    expectEq(closing_quote("a\\\"b\" rest"), 4, "escaped quote");
+    expectEq(closing_quote("a\\\\\" rest"), 3, "escaped backslash");
+    expectEq(closing_quote("no quote"), -1, "none");
+}
+
+func test_unescape_and_escape(): void {
+    expectEq(unescape("a\\\"b\\\\c"), "a\"b\\c", "quote and backslash");
+    expectEq(unescape("\\x41"), "\\x41", "other escapes stay");
+    expectEq(escape("a\"b\\c"), "a\\\"b\\\\c", "escape");
+}
+
+func test_days_and_minutes(): void {
+    expectEq(days_from_civil(1970, 1, 1), 0, "epoch");
+    expectEq(days_from_civil(2000, 3, 1), 11017, "2000-03-01");
+    expectEq(days_from_civil(2024, 2, 29) + 1, days_from_civil(2024, 3, 1), "leap day");
+    let before = make_stamp(2026, 12, 31, 23, 59, 0, "+0000");
+    let after = make_stamp(2027, 1, 1, 0, 0, 0, "+0000");
+    expectEq(minute_index(after) - minute_index(before), 1, "across new year");
+    expectEq(minute_label(before), "2026-12-31 23:59", "label");
+}
+
+func test_make_stamp_text(): void {
+    expectEq(make_stamp(2026, 3, 7, 4, 5, 6, "+0100").text, "07/Mar/2026:04:05:06 +0100", "text");
+}
+
+func test_format_entry_round_trips(): void {
+    for (line in [COMMON, COMBINED]) {
+        let e = parse(line).unwrap();
+        expectEq(format_entry(e), line, "round trip");
+    }
+}

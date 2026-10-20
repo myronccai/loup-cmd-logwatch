@@ -1,0 +1,402 @@
+{
+  "summary": {
+    "files": 1,
+    "lines": 31,
+    "requests": 29,
+    "malformed": 2,
+    "combined": 25,
+    "first": "10/Oct/2026:09:58:01 +0200",
+    "last": "10/Oct/2026:16:45:00 +0200",
+    "bytes": 49099,
+    "clients": 5,
+    "paths": 12,
+    "4xx": 4,
+    "5xx": 15
+  },
+  "paths": [
+    {
+      "rank": 1,
+      "path": "/api/items",
+      "requests": 11,
+      "percent": 37.9,
+      "bytes": 4096,
+      "4xx": 0,
+      "5xx": 9
+    },
+    {
+      "rank": 2,
+      "path": "/api/items/42",
+      "requests": 5,
+      "percent": 17.2,
+      "bytes": 0,
+      "4xx": 0,
+      "5xx": 5
+    },
+    {
+      "rank": 3,
+      "path": "/",
+      "requests": 2,
+      "percent": 6.9,
+      "bytes": 10240,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "rank": 4,
+      "path": "/api/orders",
+      "requests": 2,
+      "percent": 6.9,
+      "bytes": 512,
+      "4xx": 0,
+      "5xx": 1
+    },
+    {
+      "rank": 5,
+      "path": "/index.html",
+      "requests": 2,
+      "percent": 6.9,
+      "bytes": 10240,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "rank": 6,
+      "path": "-",
+      "requests": 1,
+      "percent": 3.4,
+      "bytes": 0,
+      "4xx": 1,
+      "5xx": 0
+    },
+    {
+      "rank": 7,
+      "path": "/about",
+      "requests": 1,
+      "percent": 3.4,
+      "bytes": 3072,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "rank": 8,
+      "path": "/admin",
+      "requests": 1,
+      "percent": 3.4,
+      "bytes": 153,
+      "4xx": 1,
+      "5xx": 0
+    },
+    {
+      "rank": 9,
+      "path": "/nope",
+      "requests": 1,
+      "percent": 3.4,
+      "bytes": 153,
+      "4xx": 1,
+      "5xx": 0
+    },
+    {
+      "rank": 10,
+      "path": "/static/app.js",
+      "requests": 1,
+      "percent": 3.4,
+      "bytes": 0,
+      "4xx": 0,
+      "5xx": 0
+    }
+  ],
+  "status": [
+    {
+      "status": "2xx",
+      "requests": 9,
+      "percent": 31.0
+    },
+    {
+      "status": "200",
+      "requests": 8,
+      "percent": 27.6
+    },
+    {
+      "status": "201",
+      "requests": 1,
+      "percent": 3.4
+    },
+    {
+      "status": "3xx",
+      "requests": 1,
+      "percent": 3.4
+    },
+    {
+      "status": "304",
+      "requests": 1,
+      "percent": 3.4
+    },
+    {
+      "status": "4xx",
+      "requests": 4,
+      "percent": 13.8
+    },
+    {
+      "status": "403",
+      "requests": 1,
+      "percent": 3.4
+    },
+    {
+      "status": "404",
+      "requests": 2,
+      "percent": 6.9
+    },
+    {
+      "status": "408",
+      "requests": 1,
+      "percent": 3.4
+    },
+    {
+      "status": "5xx",
+      "requests": 15,
+      "percent": 51.7
+    },
+    {
+      "status": "500",
+      "requests": 1,
+      "percent": 3.4
+    },
+    {
+      "status": "502",
+      "requests": 3,
+      "percent": 10.3
+    },
+    {
+      "status": "503",
+      "requests": 11,
+      "percent": 37.9
+    }
+  ],
+  "hourly": [
+    {
+      "hour": 0,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 1,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 2,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 3,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 4,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 5,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 6,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 7,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 8,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 9,
+      "requests": 3,
+      "percent": 10.3,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 10,
+      "requests": 4,
+      "percent": 13.8,
+      "4xx": 2,
+      "5xx": 0
+    },
+    {
+      "hour": 11,
+      "requests": 3,
+      "percent": 10.3,
+      "4xx": 1,
+      "5xx": 0
+    },
+    {
+      "hour": 12,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 13,
+      "requests": 1,
+      "percent": 3.4,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 14,
+      "requests": 17,
+      "percent": 58.6,
+      "4xx": 1,
+      "5xx": 15
+    },
+    {
+      "hour": 15,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 16,
+      "requests": 1,
+      "percent": 3.4,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 17,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 18,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 19,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 20,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 21,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 22,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "hour": 23,
+      "requests": 0,
+      "percent": 0.0,
+      "4xx": 0,
+      "5xx": 0
+    }
+  ],
+  "clients": [
+    {
+      "rank": 1,
+      "client": "192.0.2.44",
+      "requests": 10,
+      "percent": 34.5,
+      "bytes": 2048,
+      "4xx": 0,
+      "5xx": 9
+    },
+    {
+      "rank": 2,
+      "client": "192.0.2.10",
+      "requests": 6,
+      "percent": 20.7,
+      "bytes": 33280,
+      "4xx": 0,
+      "5xx": 0
+    },
+    {
+      "rank": 3,
+      "client": "192.0.2.45",
+      "requests": 6,
+      "percent": 20.7,
+      "bytes": 0,
+      "4xx": 0,
+      "5xx": 6
+    },
+    {
+      "rank": 4,
+      "client": "198.51.100.7",
+      "requests": 4,
+      "percent": 13.8,
+      "bytes": 13312,
+      "4xx": 1,
+      "5xx": 0
+    },
+    {
+      "rank": 5,
+      "client": "203.0.113.5",
+      "requests": 3,
+      "percent": 10.3,
+      "bytes": 459,
+      "4xx": 3,
+      "5xx": 0
+    }
+  ],
+  "bursts": [
+    {
+      "start": "2026-10-10 14:00",
+      "end": "2026-10-10 14:01",
+      "minutes": 2,
+      "errors": 10,
+      "requests": 11,
+      "top_path": "/api/items"
+    }
+  ]
+}

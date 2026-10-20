@@ -1,0 +1,22 @@
+# Tasks: logwatch
+
+- [x] 1. Layout: `bin/` entry scripts, `lib/` modules, relative imports, manifest entry and test pattern for scripts
+  - _Requirements: all_
+- [x] 2. Parse Common and Combined lines: field cutting, regex timestamp and request, escapes, memo tables
+  - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7_
+- [x] 3. Read files and standard input; skip blank lines and carriage returns; report unreadable inputs
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
+- [x] 4. Count per path, client, status, hour and minute
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
+- [x] 5. Find error bursts, with a threshold and optional 4xx
+  - _Requirements: 3.6_
+- [x] 6. Report tables and selection, percentages in tenths
+  - _Requirements: 3.7, 3.8_
+- [x] 7. Text, CSV and JSON output
+  - _Requirements: 4.1, 4.2, 4.3_
+- [x] 8. Options, usage errors, help, version, exit statuses, `--strict`
+  - _Requirements: 2.8, 5.1, 5.2, 5.3, 5.4_
+- [x] 9. Sample log generator (`bin/loggen.lpscr`)
+  - _Requirements: 6.1, 6.2, 6.3_
+- [x] 10. Unit tests, fixture with expected reports, end-to-end tests with `loup run`
+  - _Requirements: all_

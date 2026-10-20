@@ -1,0 +1,81 @@
+#!/usr/bin/env -S loup run
+@mode(host.scripted)
+
+# logwatch: analyse web server access logs in Common or Combined Log Format.
+#
+# This script is the program's top level: it reads the command line and the
+# input, prints, and sets the exit status. The parsing, counting and
+# formatting it calls are the host.dual modules in lib/.
+
+from io.fs import (isDir);
+from ..lib.appinfo import (APP_NAME, EXIT_OK, EXIT_FAILURE, EXIT_USAGE);
+from ..lib.args import (Options, parse_args);
+from ..lib.usage import (usage, version_line);
+from ..lib.analyse import (Analyser);
+from ..lib.reports import (build_reports);
+from ..lib.render import (render_text, render_csv);
+from ..lib.render_json import (render_json);
+
+let parsed = parse_args(args());
+if (parsed.is_err()) {
+    printErr(i"{$ APP_NAME $}: {$ parsed.unwrap_err() $}");
+    printErr(i"Try '{$ APP_NAME $} --help' for more information.");
+    exit(EXIT_USAGE);
+}
+let opts: Options = parsed.unwrap();
+if (opts.help) {
+    println(usage());
+    exit(EXIT_OK);
+}
+if (opts.version) {
+    println(version_line());
+    exit(EXIT_OK);
+}
+
+let analyser = Analyser(if (opts.include_4xx) { 400 } else { 500 });
+var status = EXIT_OK;
+var inputs = 0;
+for (file in opts.files) {
+    let path = if (file == "-") { "/dev/stdin" } else { file };
+    # Check before reading: under the self-hosted `loup run` an IoError from
+    # readText cannot be caught.
+    if (!exists(path)) {
+        printErr(i"{$ APP_NAME $}: {$ file $}: No such file or directory");
+        status = EXIT_FAILURE;
+        continue;
+    }
+    if (isDir(path)) {
+        printErr(i"{$ APP_NAME $}: {$ file $}: Is a directory");
+        status = EXIT_FAILURE;
+        continue;
+    }
+    let name = if (file == "-") { "(standard input)" } else { file };
+    let text = readText(path);
+    safe {
+        analyser.feed(name, text);
+    }
+    inputs += 1;
+}
+if (inputs == 0) {
+    exit(status);
+}
+
+let tables = build_reports(analyser.stats, opts.reports, opts.top, opts.burst_threshold);
+if (opts.format == "json") {
+    print(render_json(tables));
+} else if (opts.format == "csv") {
+    print(render_csv(tables));
+} else {
+    print(render_text(tables));
+}
+
+let problems = analyser.problems;
+if (problems.len() > 0 and opts.strict) {
+    for (problem in problems) {
+        printErr(i"{$ APP_NAME $}: {$ problem $}");
+    }
+    status = EXIT_FAILURE;
+} else if (problems.len() > 0) {
+    printErr(i"{$ APP_NAME $}: skipped {$ problems.len() $} malformed line(s) (--strict lists them)");
+}
+exit(status);

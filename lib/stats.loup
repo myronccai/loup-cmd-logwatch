@@ -1,0 +1,110 @@
+@mode(host.dual)
+
+# Counters for everything the reports show, filled one entry at a time.
+
+from .clf import (Entry, second_index, minute_index, minute_label);
+
+# Requests, bytes and error responses for one path, client or hour.
+pub struct Tally {
+    pub var requests: int;
+    pub var bytes: int;
+    pub var client_errors: int;
+    pub var server_errors: int;
+}
+
+pub func empty_tally(): Tally {
+    return Tally(requests = 0, bytes = 0, client_errors = 0, server_errors = 0);
+}
+
+# `t` with entry `e` counted in.
+pub func counted(t: Tally, e: Entry): Tally {
+    var out = t;
+    out.requests += 1;
+    out.bytes += e.bytes;
+    if (e.status >= 500) {
+        out.server_errors += 1;
+    } else if (e.status >= 400) {
+        out.client_errors += 1;
+    }
+    return out;
+}
+
+# One minute of traffic, for the error bursts report.
+pub struct Minute {
+    pub var label: string;
+    pub var requests: int;
+    pub var errors: int;
+    pub var error_paths: dict[string, int];
+}
+
+pub class Stats {
+    # The lowest status that counts as an error in the bursts report: 500,
+    # or 400 when client errors count too.
+    pub let error_min: int;
+    pub var files: int = 0;
+    pub var lines: int = 0;
+    pub var requests: int = 0;
+    pub var malformed: int = 0;
+    pub var combined: int = 0;
+    pub var bytes: int = 0;
+    pub var first: string = "";
+    pub var last: string = "";
+    var first_key: int = 0;
+    var last_key: int = 0;
+    pub var paths: dict[string, Tally] = {};
+    pub var clients: dict[string, Tally] = {};
+    pub var statuses: dict[int, int] = {};
+    pub var hours: list[Tally] = [];
+    pub var minutes: dict[int, Minute] = {};
+
+    new(error_min: int) {
+        this.error_min = error_min;
+        for (h in 0..24) {
+            this.hours.push(empty_tally());
+        }
+    }
+
+    pub modifier func add_file(): void {
+        this.files += 1;
+    }
+
+    pub modifier func add_malformed(): void {
+        this.lines += 1;
+        this.malformed += 1;
+    }
+
+    pub modifier func add(e: Entry): void {
+        this.lines += 1;
+        this.requests += 1;
+        this.bytes += e.bytes;
+        if (e.combined) {
+            this.combined += 1;
+        }
+
+        # First and last by time, not by position: several files may be
+        # given in any order.
+        let key = second_index(e.stamp);
+        if (this.requests == 1 or key < this.first_key) {
+            this.first_key = key;
+            this.first = e.stamp.text;
+        }
+        if (this.requests == 1 or key >= this.last_key) {
+            this.last_key = key;
+            this.last = e.stamp.text;
+        }
+
+        this.paths[e.path] = counted(this.paths.get(e.path) ?? empty_tally(), e);
+        this.clients[e.host] = counted(this.clients.get(e.host) ?? empty_tally(), e);
+        this.statuses[e.status] = (this.statuses.get(e.status) ?? 0) + 1;
+        this.hours[e.stamp.hour] = counted(this.hours[e.stamp.hour], e);
+
+        let m = minute_index(e.stamp);
+        var minute = this.minutes.get(m) ?? Minute(label = minute_label(e.stamp), requests = 0, errors = 0, error_paths = {});
+        minute.requests += 1;
+        if (e.status >= this.error_min) {
+            minute.errors += 1;
+            minute.error_paths[e.path] = (minute.error_paths.get(e.path) ?? 0) + 1;
+        }
+        this.minutes[m] = minute;
+    }
+}

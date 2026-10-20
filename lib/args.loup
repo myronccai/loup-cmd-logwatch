@@ -1,0 +1,205 @@
+@mode(host.dual)
+
+# Command-line parsing for logwatch, by hand (Loup 1.26 has no CLI library).
+#
+# Grammar: logwatch [OPTION]... [FILE]...
+#   Short options may be combined (`-s4`) and take their value attached or
+#   as the next word (`-fjson`, `-f json`); long options take `--name VALUE`
+#   or `--name=VALUE`. Options may follow files; `--` ends the options.
+
+from core.string_utils import (isDigits);
+from .reports import (REPORT_NAMES);
+
+pub const DEFAULT_FORMAT: string = "text";
+pub const DEFAULT_TOP: int = 10;
+pub const DEFAULT_BURST_THRESHOLD: int = 5;
+
+pub struct Options {
+    pub help: bool;
+    pub version: bool;
+    pub format: string;
+    pub reports: list[string];
+    pub top: int;
+    pub burst_threshold: int;
+    pub include_4xx: bool;
+    pub strict: bool;
+    pub files: list[string];
+}
+
+# The long name of a short option letter, or "".
+func long_name(letter: string): string {
+    return match letter {
+        "f" => "--format",
+        "r" => "--report",
+        "n" => "--top",
+        "t" => "--burst-threshold",
+        "4" => "--include-4xx",
+        "s" => "--strict",
+        "h" => "--help",
+        "V" => "--version",
+        _ => "",
+    };
+}
+
+func takes_value(name: string): bool {
+    return name == "--format" or name == "--report" or name == "--top" or name == "--burst-threshold";
+}
+
+# Parses a comma-separated list of report names (or `all`), keeping the
+# order given and dropping repeats.
+pub func parse_reports(value: string): Result[list[string], string] {
+    var names: list[string] = [];
+    for (raw in value.split(",")) {
+        let name = raw.trim();
+        if (name == "all") {
+            for (known in REPORT_NAMES) {
+                if (!names.contains(known)) {
+                    names.push(known);
+                }
+            }
+        } else if (REPORT_NAMES.contains(name)) {
+            if (!names.contains(name)) {
+                names.push(name);
+            }
+        } else {
+            return Err(i"invalid report '{$ name $}' (choose from {$ REPORT_NAMES.join(", ") $}, all)");
+        }
+    }
+    return Ok(names);
+}
+
+# A whole number of at least 1.
+pub func parse_positive(value: string): Option[int] {
+    if (!isDigits(value) or value.len() > 9 or value.toInt() < 1) {
+        return None;
+    }
+    return Some(value.toInt());
+}
+
+pub func parse_args(argv: list[string]): Result[Options, string] {
+    var help = false;
+    var version = false;
+    var format = DEFAULT_FORMAT;
+    var reports = REPORT_NAMES;
+    var top = DEFAULT_TOP;
+    var burst_threshold = DEFAULT_BURST_THRESHOLD;
+    var include_4xx = false;
+    var strict = false;
+    var files: list[string] = [];
+
+    # Expand the arguments into (option, value) steps first: `-s4fjson`
+    # becomes --strict, --include-4xx, --format=json.
+    var names: list[string] = [];
+    var values: list[string] = [];
+    var only_files = false;
+    var i = 0;
+    while (i < argv.len()) {
+        let arg = argv[i];
+        i += 1;
+        if (only_files or arg == "-" or !arg.startsWith("-")) {
+            files.push(arg);
+            continue;
+        }
+        if (arg == "--") {
+            only_files = true;
+            continue;
+        }
+        if (arg.startsWith("--")) {
+            var name = arg;
+            var value = "";
+            var has_value = false;
+            let eq = arg.index_of("=");
+            if (eq >= 0) {
+                name = arg.slice(0, eq);
+                value = arg.slice(eq + 1);
+                has_value = true;
+            }
+            let known = name == "--include-4xx" or name == "--strict" or name == "--help" or name == "--version";
+            if (!known and !takes_value(name)) {
+                return Err(i"unrecognized option '{$ arg $}'");
+            }
+            if (takes_value(name) and !has_value) {
+                if (i >= argv.len()) {
+                    return Err(i"option '{$ name $}' requires an argument");
+                }
+                value = argv[i];
+                i += 1;
+            } else if (!takes_value(name) and has_value) {
+                return Err(i"option '{$ name $}' doesn't allow an argument");
+            }
+            names.push(name);
+            values.push(value);
+            continue;
+        }
+        # A cluster of short options.
+        var j = 1;
+        while (j < arg.len()) {
+            let letter = arg.slice(j, j + 1);
+            j += 1;
+            let name = long_name(letter);
+            if (name == "") {
+                return Err(i"invalid option -- '{$ letter $}'");
+            }
+            var value = "";
+            if (takes_value(name)) {
+                if (j < arg.len()) {
+                    value = arg.slice(j);
+                    j = arg.len();
+                } else if (i < argv.len()) {
+                    value = argv[i];
+                    i += 1;
+                } else {
+                    return Err(i"option requires an argument -- '{$ letter $}'");
+                }
+            }
+            names.push(name);
+            values.push(value);
+        }
+    }
+
+    for (k in 0..names.len()) {
+        let name = names[k];
+        let value = values[k];
+        if (name == "--format") {
+            if (value != "text" and value != "csv" and value != "json") {
+                return Err(i"invalid format '{$ value $}' (choose text, csv or json)");
+            }
+            format = value;
+        } else if (name == "--report") {
+            reports = parse_reports(value)?;
+        } else if (name == "--top") {
+            top = match parse_positive(value) {
+                Some(n) => n,
+                None => { return Err(i"invalid --top value '{$ value $}'"); },
+            };
+        } else if (name == "--burst-threshold") {
+            burst_threshold = match parse_positive(value) {
+                Some(n) => n,
+                None => { return Err(i"invalid --burst-threshold value '{$ value $}'"); },
+            };
+        } else if (name == "--include-4xx") {
+            include_4xx = true;
+        } else if (name == "--strict") {
+            strict = true;
+        } else if (name == "--help") {
+            help = true;
+        } else if (name == "--version") {
+            version = true;
+        }
+    }
+
+    if (files.len() == 0) {
+        files.push("-");
+    }
+    return Ok(Options(
+        help = help,
+        version = version,
+        format = format,
+        reports = reports,
+        top = top,
+        burst_threshold = burst_threshold,
+        include_4xx = include_4xx,
+        strict = strict,
+        files = files,
+    ));
+}

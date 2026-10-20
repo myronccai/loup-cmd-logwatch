@@ -1,0 +1,84 @@
+@mode(host.scripted)
+
+from debug.assert import (expect, expectEq);
+from ..lib.analyse import (Analyser);
+from ..lib.stats import (Stats, Tally, empty_tally);
+
+let A = "192.0.2.1 - - [10/Oct/2026:10:00:00 +0000] \"GET /a HTTP/1.1\" 200 100";
+let B = "192.0.2.2 - - [10/Oct/2026:09:00:00 +0000] \"GET /b HTTP/1.1\" 404 10";
+let C = "192.0.2.1 - - [10/Oct/2026:11:30:00 +0000] \"GET /a?x HTTP/1.1\" 503 - \"-\" \"curl\"";
+
+func analyse(text: string, error_min: int): Analyser {
+    let a = Analyser(error_min);
+    safe {
+        a.feed("t.log", text);
+    }
+    return a;
+}
+
+func test_counts(): void {
+    let s = analyse(A + "\n" + B + "\n" + C + "\n", 500).stats;
+    expectEq(s.files, 1, "files");
+    expectEq(s.lines, 3, "lines");
+    expectEq(s.requests, 3, "requests");
+    expectEq(s.malformed, 0, "malformed");
+    expectEq(s.combined, 1, "combined");
+    expectEq(s.bytes, 110, "bytes");
+    expectEq(s.paths.len(), 2, "distinct paths");
+    expectEq(s.clients.len(), 2, "distinct clients");
+    expectEq(s.statuses[404], 1, "404s");
+}
+
+func test_tallies(): void {
+    let s = analyse(A + "\n" + B + "\n" + C + "\n", 500).stats;
+    let a = s.paths["/a"];
+    expectEq(a.requests, 2, "requests for /a");
+    expectEq(a.bytes, 100, "bytes for /a");
+    expectEq(a.server_errors, 1, "5xx for /a");
+    expectEq(s.clients["192.0.2.2"].client_errors, 1, "4xx for client 2");
+    expectEq(s.hours[11].requests, 1, "11 o'clock");
+    expectEq(s.hours[11].server_errors, 1, "11 o'clock 5xx");
+    expectEq(s.hours[12].requests, 0, "noon");
+}
+
+func test_first_and_last_are_by_time(): void {
+    let s = analyse(A + "\n" + B + "\n" + C + "\n", 500).stats;
+    expectEq(s.first, "10/Oct/2026:09:00:00 +0000", "first");
+    expectEq(s.last, "10/Oct/2026:11:30:00 +0000", "last");
+}
+
+func test_blank_lines_crlf_and_problems(): void {
+    let a = analyse(A + "\r\n\r\nnot a log line\r\n" + B, 500);
+    expectEq(a.stats.lines, 3, "blank line not counted");
+    expectEq(a.stats.requests, 2, "CRLF lines parse");
+    expectEq(a.stats.malformed, 1, "malformed");
+    expectEq(a.problems.len(), 1, "one problem");
+    expectEq(a.problems[0], "t.log:3: missing [timestamp]", "problem names file and line");
+}
+
+func test_error_minutes_follow_error_min(): void {
+    let five = analyse(B + "\n" + C + "\n", 500).stats;
+    let four = analyse(B + "\n" + C + "\n", 400).stats;
+    var five_errors = 0;
+    var four_errors = 0;
+    for (m in five.minutes.values()) {
+        five_errors += m.errors;
+    }
+    for (m in four.minutes.values()) {
+        four_errors += m.errors;
+    }
+    expectEq(five_errors, 1, "5xx only");
+    expectEq(four_errors, 2, "4xx and 5xx");
+}
+
+func test_empty_input(): void {
+    let s = analyse("", 500).stats;
+    expectEq(s.lines, 0, "no lines");
+    expectEq(s.first, "", "no first");
+    expectEq(s.hours.len(), 24, "24 hours");
+}
+
+func test_empty_tally(): void {
+    let t = empty_tally();
+    expectEq(t.requests + t.bytes + t.client_errors + t.server_errors, 0, "zero");
+}

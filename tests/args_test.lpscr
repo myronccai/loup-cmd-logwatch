@@ -1,0 +1,82 @@
+@mode(host.scripted)
+
+from debug.assert import (expect, expectEq);
+from ..lib.args import (Options, parse_args, parse_reports, parse_positive);
+
+func ok(argv: list[string]): Options {
+    return parse_args(argv).unwrap();
+}
+
+func err(argv: list[string]): string {
+    return match parse_args(argv) {
+        Ok(o) => "parsed",
+        Err(msg) => msg,
+    };
+}
+
+func test_defaults(): void {
+    let o = ok([]);
+    expectEq(o.format, "text", "format");
+    expectEq(o.reports.join(","), "summary,paths,status,hourly,clients,bursts", "reports");
+    expectEq(o.top, 10, "top");
+    expectEq(o.burst_threshold, 5, "threshold");
+    expect(!o.include_4xx and !o.strict and !o.help and !o.version, "flags off");
+    expectEq(o.files.join(","), "-", "standard input");
+}
+
+func test_short_options(): void {
+    let o = ok(["-fjson", "-n", "3", "-t2", "-s4", "-r", "paths", "a.log"]);
+    expectEq(o.format, "json", "attached value");
+    expectEq(o.top, 3, "separate value");
+    expectEq(o.burst_threshold, 2, "attached number");
+    expect(o.strict and o.include_4xx, "cluster");
+    expectEq(o.reports.join(","), "paths", "report");
+    expectEq(o.files.join(","), "a.log", "file");
+}
+
+func test_long_options(): void {
+    let o = ok(["--format=csv", "--top", "4", "--burst-threshold=9", "--include-4xx", "--strict", "--report", "bursts,summary"]);
+    expectEq(o.format, "csv", "format");
+    expectEq(o.top, 4, "top");
+    expectEq(o.burst_threshold, 9, "threshold");
+    expect(o.include_4xx and o.strict, "flags");
+    expectEq(o.reports.join(","), "bursts,summary", "order kept");
+}
+
+func test_options_after_files_and_double_dash(): void {
+    let o = ok(["a.log", "-f", "csv", "-", "--", "-n", "--top"]);
+    expectEq(o.format, "csv", "option after a file");
+    expectEq(o.files.join(","), "a.log,-,-n,--top", "files");
+}
+
+func test_help_and_version(): void {
+    expect(ok(["-h"]).help, "-h");
+    expect(ok(["--help"]).help, "--help");
+    expect(ok(["-V"]).version, "-V");
+    expect(ok(["--version"]).version, "--version");
+}
+
+func test_reports_list(): void {
+    expectEq(parse_reports("status, paths,status").unwrap().join(","), "status,paths", "trimmed, no repeats");
+    expectEq(parse_reports("bursts,all").unwrap().join(","), "bursts,summary,paths,status,hourly,clients", "all");
+}
+
+func test_parse_positive(): void {
+    expectEq(parse_positive("12").unwrap_or(0), 12, "number");
+    expect(parse_positive("0").is_none(), "zero");
+    expect(parse_positive("-1").is_none(), "negative");
+    expect(parse_positive("3x").is_none(), "junk");
+    expect(parse_positive("").is_none(), "empty");
+}
+
+func test_usage_errors(): void {
+    expectEq(err(["--bogus"]), "unrecognized option '--bogus'", "long");
+    expectEq(err(["-x"]), "invalid option -- 'x'", "short");
+    expectEq(err(["-f"]), "option requires an argument -- 'f'", "short value");
+    expectEq(err(["--top"]), "option '--top' requires an argument", "long value");
+    expectEq(err(["--strict=yes"]), "option '--strict' doesn't allow an argument", "flag with value");
+    expectEq(err(["-f", "xml"]), "invalid format 'xml' (choose text, csv or json)", "format");
+    expectEq(err(["-r", "paths,nope"]), "invalid report 'nope' (choose from summary, paths, status, hourly, clients, bursts, all)", "report");
+    expectEq(err(["-n", "0"]), "invalid --top value '0'", "top");
+    expectEq(err(["--burst-threshold", "many"]), "invalid --burst-threshold value 'many'", "threshold");
+}

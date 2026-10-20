@@ -1,0 +1,68 @@
+@mode(host.scripted)
+
+# JSON output of report tables.
+#
+# The one lib module that is host.scripted: a JSON document is built from
+# `Any` values, which host.dual accepts but flags with a W_ANY_IN_AOT_MODE
+# warning on every `loup run`. A script module uses `Any` freely.
+
+from system.json import (stringifyIndented);
+from .reports import (Cell, Table);
+
+# A cell as a JSON value: text as a string, counts as integers, tenths as a
+# number with one decimal place.
+pub func cell_value(c: Cell): Any {
+    match c {
+        Cell.Text(v) => {
+            return v;
+        },
+        Cell.Count(v) => {
+            return v;
+        },
+        Cell.Tenths(v) => {
+            return (v as float) / 10.0;
+        },
+    }
+}
+
+func cell_key(c: Cell): string {
+    match c {
+        Cell.Text(v) => {
+            return v;
+        },
+        _ => {
+            return "";
+        },
+    }
+}
+
+# One table as a JSON value: the summary as an object, the other reports as
+# arrays of objects keyed by column name.
+pub func table_value(t: Table): Any {
+    if (t.keyed) {
+        var obj: dict[string, Any] = {};
+        for (row in t.rows) {
+            obj[cell_key(row[0])] = cell_value(row[1]);
+        }
+        return obj;
+    }
+    var items: list[Any] = [];
+    for (row in t.rows) {
+        var obj: dict[string, Any] = {};
+        for (col in 0..t.columns.len()) {
+            obj[t.columns[col]] = cell_value(row[col]);
+        }
+        items.push(obj);
+    }
+    return items;
+}
+
+# All tables as one JSON object with a member per report, ending with a
+# newline.
+pub func render_json(tables: list[Table]): string {
+    var doc: dict[string, Any] = {};
+    for (t in tables) {
+        doc[t.name] = table_value(t);
+    }
+    return stringifyIndented(doc, 2) + "\n";
+}

@@ -1,83 +1,223 @@
-# template Loup commandline application
+# loup-cmd-logwatch
 
-A GitHub template for a command-line application written in
-[Loup](https://code-craft.ai/references/loup). It includes argument parsing,
-command dispatch, a sample `hello` command, tests, a native build and a CI
-workflow.
+A web server access log analyser written as a [Loup](https://code-craft.ai/references/loup)
+script: it reads Common and Combined Log Format and reports the top paths,
+the status code mix, an hourly histogram, the busiest clients and bursts of
+errors, as text, CSV or JSON.
 
-After creating a repository from this template, work through
-[REPOSITORY_TODOS.md](REPOSITORY_TODOS.md).
+Part of the **loup-cmd** series of example applications: classic Linux and
+Windows commands, and projects for each Loup execution mode, each in its own
+repository under [myronccai](https://github.com/myronccai?tab=repositories&q=loup-cmd).
+This one is a `host.scripted` project: thin `.lpscr` entry scripts in `bin/`
+that import shared `host.dual` modules from `lib/`, run with `loup run`.
 
 ## Requirements
 
-- Loup 1.26.0 or later:
+- Loup 1.26.0 or later (`loup` and `loup-bootstrap` on `PATH`):
 
   ```sh
   curl -fsSL https://github.com/code-craft-ai-company/loup-releases/releases/latest/download/loup-install.sh | sh
-  loup --version
   ```
 
-- `make`
-- `clang` 17 or later for native builds. Native builds are supported on Linux
-  x86-64 and arm64, and are a preview on macOS and Windows.
+- `make` and `bash` for the checks and tests. No C compiler: nothing is built.
 
 ## Usage
 
 ```sh
-make run ARGS="--help"            # run from source
-make run ARGS="hello Ann --shout"
-make check                        # type-check the program
-make test                         # run the tests in tests/
-make build                        # native binary: build/myapp
-make ci                           # check, test, build and smoke-test the binary
-make clean
+make run ARGS="-r summary tests/fixtures/access.log"   # loup run bin/logwatch.lpscr -- ARGS
+make -s gen ARGS="-n 5000" > sample.log                # a synthetic log
+make ci                                                # check, unit tests, end-to-end tests
 ```
+
+The scripts are executable (`#!/usr/bin/env -S loup run`). `bin/loggen.lpscr`
+writes a deterministic day of traffic with an outage at 14:00:
 
 ```text
-$ build/myapp --help
-usage: myapp [OPTIONS] COMMAND [ARGS...]
+$ loup run bin/loggen.lpscr -n 3 -s 2
+203.0.113.178 - - [10/Oct/2026:08:32:23 +0000] "GET /index.html HTTP/1.1" 200 6013 "-" "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+192.0.2.24 - - [10/Oct/2026:16:04:55 +0000] "GET /api/items HTTP/1.1" 200 2819 "-" "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
+192.0.2.24 - - [10/Oct/2026:20:04:42 +0000] "GET /static/site.css HTTP/1.1" 200 61265 "-" "curl/8.9.1"
+$ loup run bin/loggen.lpscr -n 2000 > sample.log
+$ ./bin/logwatch.lpscr -r summary,paths,bursts -n 5 sample.log
+Summary
+  files      1
+  lines      2000
+  requests   2000
+  malformed  0
+  combined   2000
+  first      10/Oct/2026:00:08:27 +0000
+  last       10/Oct/2026:23:58:52 +0000
+  bytes      25508007
+  clients    30
+  paths      12
+  4xx        65
+  5xx        163
 
-A command-line application written in Loup.
+Top paths (5 of 12)
+  rank  path              requests  percent     bytes  4xx  5xx
+     1  /                      341    17.1%   2147885    0    1
+     2  /api/items             297    14.9%    591963    0   53
+     3  /static/site.css       279    14.0%   9470585    0    2
+     4  /static/app.js         277    13.9%  10252541    0    2
+     5  /api/items/42          205    10.3%    342377    0   53
 
-Commands:
-  hello [NAME]          Print a greeting (NAME defaults to 'world')
-  help                  Show this help
-
-Options:
-  -g, --greeting TEXT   Greeting used by 'hello' (default: Hello)
-      --shout           Print the greeting in upper case
-  -v, --verbose         Print diagnostic messages to stderr
-  -h, --help            Show this help and exit
-  -V, --version         Show the version and exit
+Error bursts (5+ 5xx a minute)
+  start             end               minutes  errors  requests  top_path
+  2026-10-10 14:00  2026-10-10 14:04        5     155       210  /api/items/42
 ```
 
-Exit status: `0` success, `1` runtime failure, `2` usage error.
+[`tests/fixtures/access.log`](tests/fixtures/access.log) mixes both formats
+and has two malformed lines; [`tests/expected/`](tests/expected/) holds its
+complete reports in all three formats.
+
+```text
+$ loup run bin/logwatch.lpscr -- --report=status --format=csv tests/fixtures/access.log
+report,status,requests,percent
+status,2xx,9,31.0
+status,200,8,27.6
+status,201,1,3.4
+status,3xx,1,3.4
+status,304,1,3.4
+status,4xx,4,13.8
+status,403,1,3.4
+...
+logwatch: skipped 2 malformed line(s) (--strict lists them)
+$ ./bin/logwatch.lpscr -r bursts -t 3 -f json tests/fixtures/access.log
+{
+  "bursts": [
+    {
+      "start": "2026-10-10 14:00",
+      "end": "2026-10-10 14:01",
+      "minutes": 2,
+      "errors": 10,
+      "requests": 11,
+      "top_path": "/api/items"
+    },
+    {
+      "start": "2026-10-10 14:03",
+      "end": "2026-10-10 14:03",
+      "minutes": 1,
+      "errors": 3,
+      "requests": 3,
+      "top_path": "/api/items"
+    }
+  ]
+}
+logwatch: skipped 2 malformed line(s) (--strict lists them)
+$ ./bin/logwatch.lpscr -s -r hourly tests/fixtures/access.log | sed -n 10,18p; echo "status ${PIPESTATUS[0]}"
+logwatch: tests/fixtures/access.log:12: missing [timestamp]
+logwatch: tests/fixtures/access.log:31: bad timestamp '10/Oct/2026:31:04:00 +0200'
+     7         0     0.0%    0    0
+     8         0     0.0%    0    0
+     9         3    10.3%    0    0 ########
+    10         4    13.8%    2    0 ##########
+    11         3    10.3%    1    0 ########
+    12         0     0.0%    0    0
+    13         1     3.4%    0    0 ###
+    14        17    58.6%    1   15 ########################################
+    15         0     0.0%    0    0
+status 1
+```
+
+### Options
+
+| Option | Meaning |
+|---|---|
+| `-f`, `--format FORMAT` | `text` (default), `csv` or `json` |
+| `-r`, `--report NAMES` | comma-separated reports, printed in the order given (default all): `summary`, `paths`, `status`, `hourly`, `clients`, `bursts`, or `all` |
+| `-n`, `--top N` | rows in the `paths` and `clients` reports (default 10) |
+| `-t`, `--burst-threshold N` | errors a minute that make a minute part of a burst (default 5) |
+| `-4`, `--include-4xx` | count 4xx as well as 5xx responses as errors in `bursts` |
+| `-s`, `--strict` | list every malformed line as `FILE:LINE: reason` and exit 1 |
+| `-h`, `--help` / `-V`, `--version` | help text / `logwatch (loup-cmd-logwatch) 0.1.0` |
+
+With no FILE, or with `-`, logwatch reads standard input. Short options can
+be combined (`-s4`) and take attached values (`-fjson`, `-n5`).
+
+**Long options need `--` under `loup run`.** `loup run SCRIPT ARGS` treats
+words starting with `--` as its own flags, and the self-hosted `loup run` on
+Linux x86-64 drops unknown ones silently. Write
+`loup run bin/logwatch.lpscr -- --format json FILE` (or
+`./bin/logwatch.lpscr -- --format json FILE`), or use the short options,
+which pass through unchanged. `make run` adds the `--` for you.
+
+Reports: **summary** (files, lines, requests, malformed and Combined-format
+lines, first and last time as written, bytes, distinct clients and paths,
+4xx and 5xx counts); **paths** and **clients** (requests, share, bytes, 4xx,
+5xx; ties in name order; paths without their query string); **status**
+(each class, then its codes); **hourly** (all 24 hours of the day, with a
+bar in text output); **bursts** (runs of consecutive minutes that each have
+at least `-t` errors, with the path that failed most).
+
+Exit status: `0` success, `1` an input could not be read or `--strict` found
+malformed lines, `2` usage error.
+
+## What this example shows
+
+- **Scripts that import dual-mode modules.** `bin/logwatch.lpscr` and
+  `bin/loggen.lpscr` are `host.scripted` programs: top-level statements that
+  read arguments and files, print, and call `exit(n)`. Everything they share
+  (the log format, counting, report tables, text and CSV output) is
+  `host.dual` code in `lib/*.loup`, which unit tests import directly and
+  which could later be compiled into a native program unchanged.
+- **Relative imports across directories.** A script's package root is its
+  own directory, so `bin/` scripts import `from ..lib.clf import (...)`,
+  `lib/` modules import each other with `from .clf import (...)`, and tests
+  use `from ..lib...` too. No `LOUPPATH` is needed, and the scripts run from
+  any working directory.
+- **Choosing a mode per module.** `lib/render_json.lpscr` is the one
+  `host.scripted` lib module: a JSON document is built from `Any` values,
+  which `host.dual` accepts but flags with a `W_ANY_IN_AOT_MODE` warning on
+  every run.
+- **`system.regex` with named groups**, on the parts of a line that have a
+  grammar (the timestamp and the request line), while plain string searches
+  cut the line into fields. The regex engine is written in Loup, so the
+  parser class remembers every distinct timestamp and request it matched.
+- **Report data separate from presentation.** Reports are tables of typed
+  cells (an `enum Cell { Text, Count, Tenths }`), rendered by three
+  functions; percentages are integer tenths, so there is no float
+  formatting.
+- **`data.csv` and `system.json`** for output, **`core.random`** for a
+  deterministic generator, and **classes with `modifier` methods** called
+  inside `safe { }`.
+- **Testing a script project.** `make check` type-checks each entry script
+  with `loup-bootstrap check FILE`; unit tests are `tests/*_test.lpscr`;
+  `tests/e2e.sh` runs the scripts with `loup run` against expected output.
+
+## Limitations
+
+- Speed: about 1,000 lines a second under `loup run` (5,000 generated lines
+  in 4.6 s), mostly the pure-Loup regex engine. Real logs repeat timestamps
+  and requests, which the parser's memo tables make cheap.
+- Input is read whole, not streamed (Loup 1.26 has no line reader for
+  standard input), and there is no follow mode.
+- Times are used as written: the zone offset is shown but not applied, so a
+  log is assumed to use one zone.
+- A file that exists but cannot be read (permissions) ends the run with
+  `IoError` and status 1: the self-hosted `loup run` cannot catch `IoError`,
+  so logwatch checks only that each file exists and is not a directory.
 
 ## Layout
 
 ```text
-package.lppkg            # Loup manifest
-Makefile                 # run, check, test, build, ci, clean
-source/                  # the application's Loup code
-├── main.loup            # entry point
-├── cli/                 # argument parsing, help text, command dispatch
-└── commands/            # one module per command
-tests/                   # *_test.loup files
-specs/                   # feature specs: requirements, design, tasks
-skills/loup-programmer/  # agent skill for writing Loup
+bin/logwatch.lpscr          # the analyser (host.scripted entry script)
+bin/loggen.lpscr            # the sample log generator (host.scripted)
+lib/appinfo.loup            # name, version, exit statuses
+lib/args.loup               # option parsing
+lib/usage.loup              # --help and --version text
+lib/clf.loup                # log line parser (system.regex), Entry, format_entry
+lib/stats.loup              # counters
+lib/analyse.loup            # feeds a log's text through the parser into the counters
+lib/reports.loup            # report tables
+lib/render.loup             # text and CSV output
+lib/render_json.lpscr       # JSON output (host.scripted: uses Any)
+lib/sample.loup             # the generator behind loggen
+tests/*_test.lpscr          # unit tests (make test)
+tests/e2e.sh                # end-to-end tests with loup run (make e2e)
+tests/fixtures/access.log   # sample log with edge cases
+tests/expected/             # its full reports in text, CSV and JSON
+specs/logwatch/             # requirements, design, tasks
 ```
 
-[AGENTS.md](AGENTS.md) has the full layout, every build and test command, and
-the steps for adding a command.
-
-## Notes on the toolchain
-
-- On Linux x86-64, `loup` is the self-hosted driver and `loup-bootstrap` is
-  Stage0. `check` and `test` use `loup-bootstrap`; on other platforms both
-  names run the same tool. The Makefile handles this.
-- Modules import each other by their path under `source/`
-  (`from cli.args import (Options);`). Tests import them the same way, which
-  is why `make test` puts `source/` on `LOUPPATH`.
-- The Wasm build (`loup-bootstrap build`) is experimental: modules that use
-  `i"..."` interpolation build but trap at run time, so this template builds
-  native binaries.
+[AGENTS.md](AGENTS.md) has every check and test command and the conventions
+for changing the code.

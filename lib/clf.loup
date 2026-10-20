@@ -1,0 +1,343 @@
+@mode(host.dual)
+
+# Common Log Format (CLF) and Combined Log Format:
+#
+#   HOST IDENT USER [DD/Mon/YYYY:HH:MM:SS +ZZZZ] "REQUEST" STATUS BYTES
+#   ... the same ... "REFERER" "USER-AGENT"
+#
+# A line is cut into fields with plain string searches. The two fields that
+# have a grammar of their own, the timestamp and the request line, are
+# matched with system.regex. That regex engine is written in Loup and builds
+# a table for every match, so a ClfParser remembers each distinct timestamp
+# and request line it has matched: real logs repeat both a lot.
+
+from system.regex import (Regex);
+from system.text import (padStart);
+from core.string_utils import (isDigits);
+
+pub let MONTHS: list[string] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+pub const STAMP_PATTERN: string = "^(?P<day>\\d{2})/(?P<month>[A-Z][a-z]{2})/(?P<year>\\d{4}):(?P<hour>\\d{2}):(?P<minute>\\d{2}):(?P<second>\\d{2}) (?P<zone>[+-]\\d{4})$";
+pub const REQUEST_PATTERN: string = "^(?P<method>[A-Z]+) (?P<target>\\S+)(?: (?P<protocol>HTTP/\\d(?:\\.\\d)?))?$";
+
+# A timestamp as written in the log. The zone is kept but never applied:
+# one log is assumed to use one zone.
+pub struct Stamp {
+    pub year: int;
+    pub month: int;
+    pub day: int;
+    pub hour: int;
+    pub minute: int;
+    pub second: int;
+    pub zone: string;
+    pub text: string;
+}
+
+# A request line: `GET /index.html?x=1 HTTP/1.1`. A line that does not have
+# that shape (such as `-`) has method `-` and path `-`.
+pub struct Request {
+    pub method: string;
+    pub target: string;
+    pub path: string;
+    pub protocol: string;
+}
+
+pub struct Entry {
+    pub host: string;
+    pub ident: string;
+    pub user: string;
+    pub stamp: Stamp;
+    pub request: string;
+    pub method: string;
+    pub target: string;
+    pub path: string;
+    pub protocol: string;
+    pub status: int;
+    pub bytes: int;
+    pub referer: string;
+    pub agent: string;
+    pub combined: bool;
+}
+
+pub class ClfParser {
+    let stamp_re: Regex;
+    let request_re: Regex;
+    var stamps: dict[string, Stamp] = {};
+    var requests: dict[string, Request] = {};
+
+    new() {
+        this.stamp_re = Regex(STAMP_PATTERN);
+        this.request_re = Regex(REQUEST_PATTERN);
+    }
+
+    # Parses `DD/Mon/YYYY:HH:MM:SS +ZZZZ`.
+    pub modifier func parse_stamp(text: string): Result[Stamp, string] {
+        match this.stamps.get(text) {
+            Some(known) => { return Ok(known); },
+            None => {},
+        }
+        let m = match this.stamp_re.findFirst(text) {
+            Some(found) => found,
+            None => { return Err(i"bad timestamp '{$ text $}'"); },
+        };
+        let month = MONTHS.index_of(m.groupByName("month").unwrap_or("")) + 1;
+        let stamp = Stamp(
+            year = m.groupByName("year").unwrap_or("0").toInt(),
+            month = month,
+            day = m.groupByName("day").unwrap_or("0").toInt(),
+            hour = m.groupByName("hour").unwrap_or("0").toInt(),
+            minute = m.groupByName("minute").unwrap_or("0").toInt(),
+            second = m.groupByName("second").unwrap_or("0").toInt(),
+            zone = m.groupByName("zone").unwrap_or(""),
+            text = text,
+        );
+        if (month == 0 or stamp.day < 1 or stamp.day > 31 or stamp.hour > 23 or stamp.minute > 59 or stamp.second > 60) {
+            return Err(i"bad timestamp '{$ text $}'");
+        }
+        this.stamps[text] = stamp;
+        return Ok(stamp);
+    }
+
+    # Parses `METHOD TARGET [PROTOCOL]`; anything else becomes path `-`.
+    pub modifier func parse_request(text: string): Request {
+        match this.requests.get(text) {
+            Some(known) => { return known; },
+            None => {},
+        }
+        let req = match this.request_re.findFirst(text) {
+            Some(m) => {
+                let target = m.groupByName("target").unwrap_or("");
+                Request(
+                    method = m.groupByName("method").unwrap_or(""),
+                    target = target,
+                    path = path_of(target),
+                    protocol = m.groupByName("protocol").unwrap_or(""),
+                )
+            },
+            None => Request(method = "-", target = text, path = "-", protocol = ""),
+        };
+        this.requests[text] = req;
+        return req;
+    }
+
+    # Parses one log line (without its newline).
+    pub modifier func parse(line: string): Result[Entry, string] {
+        let host_end = line.index_of(" ");
+        if (host_end <= 0) {
+            return Err("expected HOST IDENT USER [TIME] \"REQUEST\" STATUS BYTES");
+        }
+        let host = line.slice(0, host_end);
+        var rest = line.slice(host_end + 1);
+        let ident_end = rest.index_of(" ");
+        if (ident_end <= 0) {
+            return Err("expected HOST IDENT USER [TIME] \"REQUEST\" STATUS BYTES");
+        }
+        let ident = rest.slice(0, ident_end);
+        rest = rest.slice(ident_end + 1);
+
+        let open = rest.index_of(" [");
+        if (open <= 0) {
+            return Err("missing [timestamp]");
+        }
+        let user = rest.slice(0, open);
+        rest = rest.slice(open + 2);
+        let close = rest.index_of("]");
+        if (close < 0) {
+            return Err("missing [timestamp]");
+        }
+        let stamp = this.parse_stamp(rest.slice(0, close))?;
+        rest = rest.slice(close + 1);
+
+        if (!rest.startsWith(" \"")) {
+            return Err("missing \"request\"");
+        }
+        rest = rest.slice(2);
+        let request_end = closing_quote(rest);
+        if (request_end < 0) {
+            return Err("unterminated \"request\"");
+        }
+        let request_text = unescape(rest.slice(0, request_end));
+        rest = rest.slice(request_end + 1);
+
+        if (!rest.startsWith(" ")) {
+            return Err("missing status");
+        }
+        let fields = rest.slice(1).split(" ");
+        if (fields.len() < 2) {
+            return Err("missing status or byte count");
+        }
+        let status_text = fields[0];
+        if (status_text.len() != 3 or !isDigits(status_text) or status_text.toInt() < 100 or status_text.toInt() > 599) {
+            return Err(i"bad status '{$ status_text $}'");
+        }
+        let bytes_text = fields[1];
+        if (bytes_text != "-" and !isDigits(bytes_text)) {
+            return Err(i"bad byte count '{$ bytes_text $}'");
+        }
+        let bytes = if (bytes_text == "-") { 0 } else { bytes_text.toInt() };
+
+        # Combined format: ` "REFERER" "USER-AGENT"` after the byte count.
+        rest = rest.slice(1 + status_text.len() + 1 + bytes_text.len());
+        var referer = "";
+        var agent = "";
+        var combined = false;
+        if (rest.startsWith(" \"")) {
+            rest = rest.slice(2);
+            let referer_end = closing_quote(rest);
+            if (referer_end < 0) {
+                return Err("unterminated \"referer\"");
+            }
+            referer = unescape(rest.slice(0, referer_end));
+            rest = rest.slice(referer_end + 1);
+            if (!rest.startsWith(" \"")) {
+                return Err("missing \"user-agent\"");
+            }
+            rest = rest.slice(2);
+            let agent_end = closing_quote(rest);
+            if (agent_end < 0) {
+                return Err("unterminated \"user-agent\"");
+            }
+            agent = unescape(rest.slice(0, agent_end));
+            combined = true;
+        }
+
+        let req = this.parse_request(request_text);
+        return Ok(Entry(
+            host = host,
+            ident = ident,
+            user = user,
+            stamp = stamp,
+            request = request_text,
+            method = req.method,
+            target = req.target,
+            path = req.path,
+            protocol = req.protocol,
+            status = status_text.toInt(),
+            bytes = bytes,
+            referer = referer,
+            agent = agent,
+            combined = combined,
+        ));
+    }
+}
+
+# The request target without its query string and fragment.
+pub func path_of(target: string): string {
+    var path = target;
+    let query = path.index_of("?");
+    if (query >= 0) {
+        path = path.slice(0, query);
+    }
+    let fragment = path.index_of("#");
+    if (fragment >= 0) {
+        path = path.slice(0, fragment);
+    }
+    return if (path.len() == 0) { "/" } else { path };
+}
+
+# The index of the first `"` in `text` that is not escaped by a backslash,
+# or -1.
+pub func closing_quote(text: string): int {
+    var offset = 0;
+    var rest = text;
+    while (true) {
+        let i = rest.index_of("\"");
+        if (i < 0) {
+            return -1;
+        }
+        var slashes = 0;
+        while (slashes < i and rest.slice(i - slashes - 1, i - slashes) == "\\") {
+            slashes += 1;
+        }
+        if (slashes % 2 == 0) {
+            return offset + i;
+        }
+        offset += i + 1;
+        rest = rest.slice(i + 1);
+    }
+    return -1;
+}
+
+# Undoes the `\"` and `\\` escapes servers write inside quoted fields.
+pub func unescape(text: string): string {
+    if (text.index_of("\\") < 0) {
+        return text;
+    }
+    var out = "";
+    var escaped = false;
+    for (ch in text) {
+        if (escaped) {
+            if (ch != "\"" and ch != "\\") {
+                out += "\\";
+            }
+            out += ch;
+            escaped = false;
+        } else if (ch == "\\") {
+            escaped = true;
+        } else {
+            out += ch;
+        }
+    }
+    if (escaped) {
+        out += "\\";
+    }
+    return out;
+}
+
+# Escapes `"` and `\` for a quoted log field.
+pub func escape(text: string): string {
+    return text.replace("\\", "\\\\").replace("\"", "\\\"");
+}
+
+# Days from 1970-01-01 to the given civil date (proleptic Gregorian).
+pub func days_from_civil(year: int, month: int, day: int): int {
+    let y = if (month <= 2) { year - 1 } else { year };
+    let era = (if (y >= 0) { y } else { y - 399 }) / 400;
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+
+# Minutes since 1970-01-01 00:00 of the time as written (zone not applied).
+pub func minute_index(s: Stamp): int {
+    return days_from_civil(s.year, s.month, s.day) * 1440 + s.hour * 60 + s.minute;
+}
+
+# Seconds since 1970-01-01 00:00:00 of the time as written.
+pub func second_index(s: Stamp): int {
+    return minute_index(s) * 60 + s.second;
+}
+
+func pad2(n: int): string {
+    return padStart(str(n), 2, "0");
+}
+
+# `2026-10-10 14:02`: the minute a timestamp falls in.
+pub func minute_label(s: Stamp): string {
+    return i"{$ s.year $}-{$ pad2(s.month) $}-{$ pad2(s.day) $} {$ pad2(s.hour) $}:{$ pad2(s.minute) $}";
+}
+
+# Builds a Stamp, with its log text, from its parts. `month` is 1 to 12.
+pub func make_stamp(year: int, month: int, day: int, hour: int, minute: int, second: int, zone: string): Stamp {
+    let text = i"{$ pad2(day) $}/{$ MONTHS[month - 1] $}/{$ year $}:{$ pad2(hour) $}:{$ pad2(minute) $}:{$ pad2(second) $} {$ zone $}";
+    return Stamp(year = year, month = month, day = day, hour = hour, minute = minute, second = second, zone = zone, text = text);
+}
+
+# Writes an entry back as a log line: Combined format when `combined` is
+# set, Common otherwise. Zero bytes are written as `-`.
+pub func format_entry(e: Entry): string {
+    let bytes = if (e.bytes == 0) { "-" } else { str(e.bytes) };
+    var line = i"{$ e.host $} {$ e.ident $} {$ e.user $} [{$ e.stamp.text $}] " + quoted(e.request) + i" {$ e.status $} {$ bytes $}";
+    if (e.combined) {
+        line += " " + quoted(e.referer) + " " + quoted(e.agent);
+    }
+    return line;
+}
+
+# A quoted, escaped log field. (The self-hosted `loup run` does not process
+# backslash escapes inside i"..." strings, so quotes are added here.)
+func quoted(text: string): string {
+    return "\"" + escape(text) + "\"";
+}

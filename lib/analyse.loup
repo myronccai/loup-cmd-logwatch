@@ -1,0 +1,52 @@
+@mode(host.dual)
+
+# Feeds the text of a log through the parser into the counters, and keeps
+# the location of every line it could not parse.
+
+from .clf import (ClfParser, Entry);
+from .stats import (Stats);
+
+pub class Analyser {
+    pub let stats: Stats;
+    let parser: ClfParser;
+    # `FILE:LINE: reason` for each malformed line, in input order.
+    pub var problems: list[string] = [];
+
+    # `error_min` is the lowest status the bursts report counts as an error.
+    new(error_min: int) {
+        this.stats = Stats(error_min);
+        this.parser = ClfParser();
+    }
+
+    # Analyses the whole text of one input; `name` is used in problems.
+    pub modifier func feed(name: string, text: string): void {
+        safe {
+            this.stats.add_file();
+        }
+        var number = 0;
+        for (raw in text.split("\n")) {
+            number += 1;
+            let line = if (raw.endsWith("\r")) { raw.slice(0, raw.len() - 1) } else { raw };
+            if (line.len() == 0) {
+                continue;
+            }
+            var parsed: Result[Entry, string] = Err("");
+            safe {
+                parsed = this.parser.parse(line);
+            }
+            match parsed {
+                Ok(e) => {
+                    safe {
+                        this.stats.add(e);
+                    }
+                },
+                Err(reason) => {
+                    safe {
+                        this.stats.add_malformed();
+                    }
+                    this.problems.push(i"{$ name $}:{$ number $}: {$ reason $}");
+                },
+            }
+        }
+    }
+}

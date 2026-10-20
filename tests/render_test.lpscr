@@ -1,0 +1,110 @@
+@mode(host.scripted)
+
+from debug.assert import (expect, expectEq);
+from ..lib.reports import (Cell, Table);
+from ..lib.render import (format_tenths, cell_text, bar, table_text, render_text, table_csv, render_csv);
+from ..lib.render_json import (render_json, cell_value);
+
+func small(): Table {
+    return Table(
+        name = "paths",
+        title = "Top paths (2 of 2)",
+        columns = ["rank", "path", "requests", "percent"],
+        rows = [
+            [Cell.Count(value = 1), Cell.Text(value = "/a,b"), Cell.Count(value = 12), Cell.Tenths(value = 800)],
+            [Cell.Count(value = 2), Cell.Text(value = "/say \"hi\""), Cell.Count(value = 3), Cell.Tenths(value = 200)],
+        ],
+        keyed = false,
+        bar = 2,
+    );
+}
+
+func summary(): Table {
+    return Table(
+        name = "summary",
+        title = "Summary",
+        columns = ["field", "value"],
+        rows = [[Cell.Text(value = "lines"), Cell.Count(value = 31)], [Cell.Text(value = "first"), Cell.Text(value = "x")]],
+        keyed = true,
+        bar = -1,
+    );
+}
+
+func test_format_tenths(): void {
+    expectEq(format_tenths(333), "33.3", "33.3");
+    expectEq(format_tenths(5), "0.5", "0.5");
+    expectEq(format_tenths(1000), "100.0", "100.0");
+}
+
+func test_cell_text(): void {
+    expectEq(cell_text(Cell.Tenths(value = 125), true), "12.5%", "with sign");
+    expectEq(cell_text(Cell.Tenths(value = 125), false), "12.5", "without sign");
+    expectEq(cell_text(Cell.Count(value = 7), true), "7", "count");
+}
+
+func test_bar_scales_to_the_largest_value(): void {
+    expectEq(bar(10, 10).len(), 40, "full width");
+    expectEq(bar(5, 10).len(), 20, "half");
+    expectEq(bar(1, 1000), "#", "a small value still shows");
+    expectEq(bar(0, 10), "", "zero");
+}
+
+func test_table_text_aligns_columns(): void {
+    let want = [
+        "Top paths (2 of 2)",
+        "  rank  path       requests  percent",
+        "     1  /a,b             12    80.0% ########################################",
+        "     2  /say \"hi\"         3    20.0% ##########",
+    ].join("\n");
+    expectEq(table_text(small()), want, "table");
+}
+
+func test_keyed_table_has_no_header(): void {
+    expectEq(table_text(summary()), "Summary\n  lines  31\n  first  x", "summary");
+}
+
+func test_empty_table_says_none(): void {
+    let t = Table(name = "bursts", title = "Error bursts", columns = ["start"], rows = [], keyed = false, bar = -1);
+    expectEq(table_text(t), "Error bursts\n  (none)", "none");
+    expectEq(table_csv(t), "report,start", "header only");
+}
+
+func test_render_text_separates_tables(): void {
+    expectEq(render_text([summary(), summary()]), "Summary\n  lines  31\n  first  x\n\nSummary\n  lines  31\n  first  x\n", "two tables");
+}
+
+func test_csv_quotes_fields(): void {
+    let want = "report,rank,path,requests,percent\npaths,1,\"/a,b\",12,80.0\npaths,2,\"/say \"\"hi\"\"\",3,20.0";
+    expectEq(table_csv(small()), want, "csv");
+    expectEq(render_csv([summary()]), "report,field,value\nsummary,lines,31\nsummary,first,x\n", "keyed csv");
+}
+
+# (system.json's parse cannot be used here: a program that imports data.csv,
+# as render.loup does, gets the CSV parser for it. Compare the text.)
+func test_json_types(): void {
+    let want = [
+        "{",
+        "  \"summary\": {",
+        "    \"lines\": 31,",
+        "    \"first\": \"x\"",
+        "  },",
+        "  \"paths\": [",
+        "    {",
+        "      \"rank\": 1,",
+        "      \"path\": \"/a,b\",",
+        "      \"requests\": 12,",
+        "      \"percent\": 80.0",
+        "    },",
+        "    {",
+        "      \"rank\": 2,",
+        "      \"path\": \"/say \\\"hi\\\"\",",
+        "      \"requests\": 3,",
+        "      \"percent\": 20.0",
+        "    }",
+        "  ]",
+        "}",
+        "",
+    ].join("\n");
+    expectEq(render_json([summary(), small()]), want, "json");
+    expectEq(cell_value(Cell.Tenths(value = 333)) as float, 33.3, "tenths are a number");
+}

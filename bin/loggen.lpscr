@@ -1,0 +1,34 @@
+#!/usr/bin/env -S loup run
+@mode(host.scripted)
+
+# loggen: write a synthetic access log (one day, with an outage at 14:00)
+# for trying logwatch. It shares lib/clf.loup with logwatch, so whatever it
+# writes, logwatch can read.
+#
+#   loup run bin/loggen.lpscr -n 5000 -s 7 | loup run bin/logwatch.lpscr
+
+from ..lib.appinfo import (APP_VERSION, EXIT_OK, EXIT_USAGE);
+from ..lib.sample import (GenOptions, generate, parse_gen_args);
+
+let USAGE = "usage: loggen [-n LINES] [-s SEED] [-c]\n\nWrite LINES (default 1000) access log lines for one day in Combined Log\nFormat, or Common Log Format with -c. The same SEED (default 1) gives the\nsame log.";
+
+let parsed = parse_gen_args(args());
+if (parsed.is_err()) {
+    printErr("loggen: " + parsed.unwrap_err());
+    printErr(USAGE);
+    exit(EXIT_USAGE);
+}
+let opts: GenOptions = parsed.unwrap();
+if (opts.help) {
+    println(USAGE);
+    exit(EXIT_OK);
+}
+if (opts.version) {
+    println(i"loggen (loup-cmd-logwatch) {$ APP_VERSION $}");
+    exit(EXIT_OK);
+}
+
+let lines = generate(opts.lines, opts.seed, opts.combined);
+if (lines.len() > 0) {
+    print(lines.join("\n") + "\n");
+}

@@ -1,0 +1,109 @@
+@mode(host.scripted)
+
+from debug.assert import (expect, expectEq);
+from ..lib.analyse import (Analyser);
+from ..lib.stats import (Stats, Tally, empty_tally);
+from ..lib.reports import (Cell, Table, percent_tenths, top_keys, summary_table, paths_table, status_table, hourly_table, bursts_table, build_reports);
+from ..lib.render import (cell_text);
+
+# tests/fixtures/access.log: 29 requests, 2 malformed lines, and 5xx
+# errors per minute of 5 (14:00), 5 (14:01), 2 (14:02, plus a 404) and 3
+# (14:03).
+func fixture(error_min: int): Stats {
+    let a = Analyser(error_min);
+    safe {
+        a.feed("access.log", readText("tests/fixtures/access.log"));
+    }
+    return a.stats;
+}
+
+func row_text(t: Table, r: int): string {
+    var parts: list[string] = [];
+    for (c in t.rows[r]) {
+        parts.push(cell_text(c, false));
+    }
+    return parts.join("|");
+}
+
+func test_percent_tenths_rounds_half_up(): void {
+    expectEq(percent_tenths(1, 3), 333, "33.3");
+    expectEq(percent_tenths(2, 3), 667, "66.7");
+    expectEq(percent_tenths(1, 16), 63, "6.25 rounds up");
+    expectEq(percent_tenths(5, 5), 1000, "100");
+    expectEq(percent_tenths(0, 0), 0, "nothing");
+}
+
+func test_top_keys_orders_by_requests_then_name(): void {
+    var tallies: dict[string, Tally] = {};
+    for (k in ["/c", "/b", "/a"]) {
+        var t = empty_tally();
+        t.requests = if (k == "/c") { 5 } else { 2 };
+        tallies[k] = t;
+    }
+    expectEq(top_keys(tallies, 10).join(" "), "/c /a /b", "order");
+    expectEq(top_keys(tallies, 2).join(" "), "/c /a", "limit");
+}
+
+func test_summary(): void {
+    let t = summary_table(fixture(500));
+    expect(t.keyed, "keyed");
+    var lines: list[string] = [];
+    for (r in 0..t.rows.len()) {
+        lines.push(row_text(t, r));
+    }
+    expectEq(lines.join(" "), "files|1 lines|31 requests|29 malformed|2 combined|25 first|10/Oct/2026:09:58:01 +0200 last|10/Oct/2026:16:45:00 +0200 bytes|49099 clients|5 paths|12 4xx|4 5xx|15", "summary rows");
+}
+
+func test_paths(): void {
+    let t = paths_table(fixture(500), 3);
+    expectEq(t.title, "Top paths (3 of 12)", "title");
+    expectEq(row_text(t, 0), "1|/api/items|11|37.9|4096|0|9", "first");
+    expectEq(row_text(t, 2), "3|/|2|6.9|10240|0|0", "tie broken by name");
+}
+
+func test_status_classes_then_codes(): void {
+    let t = status_table(fixture(500));
+    var keys: list[string] = [];
+    for (r in 0..t.rows.len()) {
+        keys.push(cell_text(t.rows[r][0], false));
+    }
+    expectEq(keys.join(" "), "2xx 200 201 3xx 304 4xx 403 404 408 5xx 500 502 503", "order");
+    expectEq(row_text(t, 9), "5xx|15|51.7", "5xx share");
+}
+
+func test_hourly_has_24_rows_and_a_bar(): void {
+    let t = hourly_table(fixture(500));
+    expectEq(t.rows.len(), 24, "hours");
+    expectEq(t.bar, 1, "bar on requests");
+    expectEq(row_text(t, 14), "14|17|58.6|1|15", "14 o'clock");
+}
+
+func test_bursts_default_threshold(): void {
+    let t = bursts_table(fixture(500), 5);
+    expectEq(t.rows.len(), 1, "one burst");
+    expectEq(row_text(t, 0), "2026-10-10 14:00|2026-10-10 14:01|2|10|11|/api/items", "burst");
+    expectEq(t.title, "Error bursts (5+ 5xx a minute)", "title");
+}
+
+func test_bursts_split_and_join_with_threshold(): void {
+    let three = bursts_table(fixture(500), 3);
+    expectEq(three.rows.len(), 2, "14:02 breaks the run");
+    expectEq(row_text(three, 1), "2026-10-10 14:03|2026-10-10 14:03|1|3|3|/api/items", "second run");
+    let two = bursts_table(fixture(500), 2);
+    expectEq(two.rows.len(), 1, "one long run");
+    expectEq(row_text(two, 0), "2026-10-10 14:00|2026-10-10 14:03|4|15|17|/api/items", "whole outage");
+}
+
+func test_bursts_with_client_errors(): void {
+    let t = bursts_table(fixture(400), 3);
+    expectEq(t.rows.len(), 1, "the 404 at 14:02 joins the runs");
+    expectEq(row_text(t, 0), "2026-10-10 14:00|2026-10-10 14:03|4|16|17|/api/items", "burst");
+    expectEq(t.title, "Error bursts (3+ 4xx/5xx a minute)", "title");
+}
+
+func test_build_reports_keeps_the_order_given(): void {
+    let tables = build_reports(fixture(500), ["bursts", "summary"], 10, 5);
+    expectEq(tables.len(), 2, "two");
+    expectEq(tables[0].name, "bursts", "first");
+    expectEq(tables[1].name, "summary", "second");
+}

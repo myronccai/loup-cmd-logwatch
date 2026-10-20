@@ -1,0 +1,61 @@
+@mode(host.scripted)
+
+from debug.assert import (expect, expectEq);
+from ..lib.clf import (ClfParser, Entry, second_index);
+from ..lib.analyse import (Analyser);
+from ..lib.reports import (bursts_table);
+from ..lib.sample import (GenOptions, generate, parse_gen_args);
+
+func test_line_count_and_determinism(): void {
+    let a = generate(50, 7, true);
+    let b = generate(50, 7, true);
+    let c = generate(50, 8, true);
+    expectEq(a.len(), 50, "count");
+    expectEq(a.join("\n"), b.join("\n"), "same seed, same log");
+    expect(a.join("\n") != c.join("\n"), "another seed, another log");
+    expectEq(generate(0, 1, true).len(), 0, "no lines");
+}
+
+func test_lines_parse_in_time_order(): void {
+    let p = ClfParser();
+    var previous = 0;
+    for (line in generate(200, 3, true)) {
+        var r: Result[Entry, string] = Err("");
+        safe {
+            r = p.parse(line);
+        }
+        expect(r.is_ok(), i"parses: {$ line $}");
+        let e = r.unwrap();
+        expect(e.combined, "combined");
+        expect(second_index(e.stamp) >= previous, "time order");
+        previous = second_index(e.stamp);
+    }
+}
+
+func test_common_format(): void {
+    for (line in generate(20, 1, false)) {
+        expect(!line.endsWith("\""), i"common line: {$ line $}");
+    }
+}
+
+func test_outage_is_a_burst(): void {
+    let a = Analyser(500);
+    safe {
+        a.feed("gen", generate(1000, 1, true).join("\n"));
+    }
+    let t = bursts_table(a.stats, 5);
+    expect(t.rows.len() >= 1, "a burst");
+}
+
+func test_gen_args(): void {
+    let o = parse_gen_args(["-n", "20", "--seed", "4", "-c"]).unwrap();
+    expectEq(o.lines, 20, "lines");
+    expectEq(o.seed, 4, "seed");
+    expect(!o.combined, "common");
+    let d = parse_gen_args([]).unwrap();
+    expectEq(d.lines, 1000, "default lines");
+    expect(d.combined, "default combined");
+    expectEq(parse_gen_args(["-n", "x"]).unwrap_err(), "invalid number 'x' for '-n'", "bad number");
+    expectEq(parse_gen_args(["-q"]).unwrap_err(), "unrecognized argument '-q'", "unknown");
+    expectEq(parse_gen_args(["-s"]).unwrap_err(), "option '-s' requires an argument", "missing value");
+}

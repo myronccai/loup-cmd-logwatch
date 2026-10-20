@@ -1,0 +1,228 @@
+@mode(host.dual)
+
+# Synthetic access logs for demos, tests and timing: one day of traffic with
+# a daily rhythm, a few heavy clients, and an outage from 14:00 to 14:05 in
+# which most /api/ requests fail with 503. The same seed always gives the
+# same log.
+
+from core.random import (Random);
+from core.string_utils import (isDigits);
+from .clf import (Entry, make_stamp, format_entry, second_index, path_of);
+
+pub const DEFAULT_LINES: int = 1000;
+pub const DEFAULT_SEED: int = 1;
+
+pub struct GenOptions {
+    pub var help: bool;
+    pub var version: bool;
+    pub var lines: int;
+    pub var seed: int;
+    pub var combined: bool;
+}
+
+# Requests per hour of the day, relative.
+let HOUR_WEIGHTS: list[int] = [2, 1, 1, 1, 1, 2, 3, 5, 8, 10, 11, 12, 12, 11, 11, 10, 10, 9, 8, 7, 6, 5, 4, 3];
+let TARGETS: list[string] = ["/", "/index.html", "/about", "/static/app.js", "/static/site.css", "/favicon.ico", "/api/items", "/api/items?page=2", "/api/items/42", "/api/orders", "/login", "/admin", "/wp-login.php"];
+let TARGET_WEIGHTS: list[int] = [20, 5, 5, 15, 15, 8, 9, 3, 8, 5, 4, 2, 1];
+let API_TARGETS: list[string] = ["/api/items", "/api/items/42", "/api/orders"];
+let AGENTS: list[string] = [
+    "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+    "curl/8.9.1",
+];
+
+# Uniform and weighted choices from core.random.
+class Dice {
+    var rng: Random;
+
+    new(seed: int) {
+        this.rng = Random(seed);
+    }
+
+    # A number from 0 to n - 1. Uses the high bits of the generator, which
+    # are better spread than its low bits.
+    pub modifier func below(n: int): int {
+        var raw = 0;
+        safe {
+            raw = this.rng.nextU64();
+        }
+        return ((raw >> 33) & 0x7FFFFFFF) % n;
+    }
+
+    # An index into `weights`, chosen in proportion to its weight.
+    pub modifier func weighted(weights: list[int]): int {
+        var total = 0;
+        for (w in weights) {
+            total += w;
+        }
+        var roll = this.below(total);
+        for (i in 0..weights.len()) {
+            if (roll < weights[i]) {
+                return i;
+            }
+            roll -= weights[i];
+        }
+        return weights.len() - 1;
+    }
+
+    # True with a probability of `percent` in 100.
+    pub modifier func chance(percent: int): bool {
+        return this.below(100) < percent;
+    }
+}
+
+# Thirty documentation-range addresses; the first few send the most.
+func client(edits dice: Dice): string {
+    var n = 0;
+    safe {
+        n = if (dice.chance(40)) { dice.below(4) } else { dice.below(30) };
+    }
+    let net = if (n < 10) { "192.0.2" } else if (n < 20) { "198.51.100" } else { "203.0.113" };
+    return i"{$ net $}.{$ 10 + n * 7 $}";
+}
+
+func status_for(edits dice: Dice, target: string): int {
+    let path = path_of(target);
+    var roll = 0;
+    safe {
+        roll = dice.below(1000);
+    }
+    if (path == "/admin") {
+        return 403;
+    }
+    if (path == "/wp-login.php") {
+        return 404;
+    }
+    if (roll < 5) {
+        return 500;
+    }
+    if (path.startsWith("/static/") and roll < 300) {
+        return 304;
+    }
+    return 200;
+}
+
+func bytes_for(edits dice: Dice, target: string, status: int): int {
+    var size = 0;
+    safe {
+        size = if (target.startsWith("/static/")) { 20000 + dice.below(60000) } else if (target.startsWith("/api/")) { 300 + dice.below(4000) } else { 2000 + dice.below(9000) };
+    }
+    if (status == 304 or status >= 500) {
+        return 0;
+    }
+    if (status >= 400) {
+        return 150 + size % 100;
+    }
+    return size;
+}
+
+func entry(edits dice: Dice, second: int, target: string, status: int, combined: bool): Entry {
+    let path = path_of(target);
+    var method = "GET";
+    var agent = "";
+    var referer = "-";
+    safe {
+        if ((path == "/login" or path == "/api/orders") and dice.chance(50)) {
+            method = "POST";
+        }
+        agent = AGENTS[dice.below(AGENTS.len())];
+        if (dice.chance(30)) {
+            referer = "https://www.example.com/";
+        }
+    }
+    let request = method + " " + target + " HTTP/1.1";
+    return Entry(
+        host = client(edits: dice),
+        ident = "-",
+        user = if (path == "/admin") { "alice" } else { "-" },
+        stamp = make_stamp(2026, 10, 10, second / 3600, (second / 60) % 60, second % 60, "+0000"),
+        request = request,
+        method = method,
+        target = target,
+        path = path,
+        protocol = "HTTP/1.1",
+        status = status,
+        bytes = bytes_for(edits: dice, target, status),
+        referer = if (combined) { referer } else { "" },
+        agent = if (combined) { agent } else { "" },
+        combined = combined,
+    );
+}
+
+# `lines` log lines in time order, as written by format_entry.
+pub func generate(lines: int, seed: int, combined: bool): list[string] {
+    let dice = Dice(seed);
+    let outage = lines / 10;
+    var entries: list[Entry] = [];
+    for (i in 0..lines) {
+        if (i < outage) {
+            # The outage: 14:00:00 to 14:04:59, mostly 503 from the API.
+            var second = 0;
+            var target = "";
+            var failed = false;
+            safe {
+                second = 14 * 3600 + dice.below(300);
+                target = API_TARGETS[dice.below(API_TARGETS.len())];
+                failed = dice.chance(80);
+            }
+            entries.push(entry(edits: dice, second, target, if (failed) { 503 } else { 200 }, combined));
+        } else {
+            var second = 0;
+            var target = "";
+            safe {
+                second = dice.weighted(HOUR_WEIGHTS) * 3600 + dice.below(3600);
+                target = TARGETS[dice.weighted(TARGET_WEIGHTS)];
+            }
+            let status = status_for(edits: dice, target);
+            entries.push(entry(edits: dice, second, target, status, combined));
+        }
+    }
+    entries.sort(func(a: Entry, b: Entry): int { return second_index(a.stamp) - second_index(b.stamp); });
+    var out: list[string] = [];
+    for (e in entries) {
+        out.push(format_entry(e));
+    }
+    return out;
+}
+
+func number(value: string): Option[int] {
+    if (!isDigits(value) or value.len() > 9) {
+        return None;
+    }
+    return Some(value.toInt());
+}
+
+# Command line of bin/loggen.lpscr: [-n LINES] [-s SEED] [-c] [-h] [-V].
+pub func parse_gen_args(argv: list[string]): Result[GenOptions, string] {
+    var opts = GenOptions(help = false, version = false, lines = DEFAULT_LINES, seed = DEFAULT_SEED, combined = true);
+    var i = 0;
+    while (i < argv.len()) {
+        let arg = argv[i];
+        i += 1;
+        if (arg == "-h" or arg == "--help") {
+            opts.help = true;
+        } else if (arg == "-V" or arg == "--version") {
+            opts.version = true;
+        } else if (arg == "-c" or arg == "--common") {
+            opts.combined = false;
+        } else if (arg == "-n" or arg == "--lines" or arg == "-s" or arg == "--seed") {
+            if (i >= argv.len()) {
+                return Err(i"option '{$ arg $}' requires an argument");
+            }
+            let value = number(argv[i]);
+            i += 1;
+            if (value.is_none()) {
+                return Err(i"invalid number '{$ argv[i - 1] $}' for '{$ arg $}'");
+            }
+            if (arg == "-n" or arg == "--lines") {
+                opts.lines = value.unwrap();
+            } else {
+                opts.seed = value.unwrap();
+            }
+        } else {
+            return Err(i"unrecognized argument '{$ arg $}'");
+        }
+    }
+    return Ok(opts);
+}
