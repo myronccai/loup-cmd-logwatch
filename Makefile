@@ -36,12 +36,13 @@ check:
 
 # Unit tests (tests/*_test.lpscr). They import lib/ with relative imports
 # (`from ..lib.clf import (...)`), which the Stage0 runner resolves. Files
-# run one at a time: run all at once, the 1.26.0 runner fails random tests
-# with an empty RuntimeError on a busy machine.
+# run one at a time and tests one at a time (--no-parallel): in parallel, the
+# 1.26.0 runner fails random tests with an empty RuntimeError on a busy
+# machine.
 # Narrow the run: `make test TESTS=tests/clf_test.lpscr TEST_ARGS="--filter quote"`.
 test:
 	@status=0; for t in $(TESTS); do \
-		$(LOUP_BOOTSTRAP) test --no-color --file $$t $(TEST_ARGS) || status=1; \
+		$(LOUP_BOOTSTRAP) test --no-color --no-parallel --file $$t $(TEST_ARGS) || status=1; \
 	done; exit $$status
 
 # End-to-end tests: run the scripts with `loup run` and compare their output
