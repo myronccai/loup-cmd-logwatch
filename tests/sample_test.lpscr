@@ -1,8 +1,8 @@
 @mode(host.scripted)
 
 # Unit tests for the sample log generator (lib/sample.loup): determinism
-# per seed, parsable lines in time order, Common format, the outage burst,
-# and loggen's arguments.
+# per seed, parsable lines in time order, Common format, the status rules,
+# the outage burst, and loggen's arguments.
 #
 # Runtime: host.scripted, run by the test runner: `make test` interprets
 # this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
@@ -45,6 +45,27 @@ func test_common_format(): void {
     for (line in generate(20, 1, false)) {
         expect(!line.endsWith("\""), i"common line: {$ line $}");
     }
+}
+
+func test_statuses_follow_the_paths(): void {
+    let p = ClfParser();
+    var static_304 = 0;
+    for (line in generate(2000, 5, true)) {
+        var r: Result[Entry, string] = Err("");
+        safe {
+            r = p.parse(line);
+        }
+        let e = r.unwrap();
+        if (e.path == "/admin") {
+            expectEq(e.status, 403, "admin is forbidden");
+        } else if (e.path == "/wp-login.php") {
+            expectEq(e.status, 404, "no WordPress here");
+        } else if (e.status == 304) {
+            expect(e.path.startsWith("/static/"), i"only static files are cached: {$ line $}");
+            static_304 += 1;
+        }
+    }
+    expect(static_304 > 0, "some static files come from the cache");
 }
 
 func test_outage_is_a_burst(): void {

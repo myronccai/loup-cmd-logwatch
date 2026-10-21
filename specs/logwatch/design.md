@@ -15,7 +15,7 @@ its options with `parse_gen_args` and prints `generate(...)`.
 ```text
 args() ─ parse_args ─► Options
 files ─ readText ─► Analyser.feed ─ ClfParser.parse ─► Entry ─► Stats.add
-Stats ─ build_reports ─► list[Table] ─ render_text / render_csv / render_json ─► stdout
+Stats ─ build_reports ─► list[Table] ─ TableFormat.render (Text / Csv / Json) ─► stdout
 ```
 
 ## Modules
@@ -26,13 +26,14 @@ Stats ─ build_reports ─► list[Table] ─ render_text / render_csv / render
 | `bin/loggen.lpscr` | scripted | top level of the generator |
 | `lib/appinfo.loup` | dual | name, version, exit statuses |
 | `lib/args.loup` | dual | `Options`, `parse_args`, `parse_reports`, `parse_positive` |
-| `lib/usage.loup` | dual | `usage()`, `version_line()` |
-| `lib/clf.loup` | dual | `Stamp`, `Request`, `Entry`, `ClfParser`, `path_of`, `closing_quote`, `unescape`, `escape`, date arithmetic, `make_stamp`, `format_entry` |
+| `lib/usage.loup` | dual | `usage()` (a `(text)` template fence), `version_line()` |
+| `lib/inputs.loup` | dual | `input_problem`, `readable` (`test -r` through `io.proc`) |
+| `lib/clf.loup` | dual | `Stamp`, `Request`, `Entry`, `ClfParser`, `path_of`, `closing_quote`, `unescape`, `escape`, minute and second indexes (`core.datetime.daysFromCivil`), `make_stamp`, `format_entry` |
 | `lib/stats.loup` | dual | `Tally`, `Minute`, `Stats` |
-| `lib/analyse.loup` | dual | `Analyser`: splits text into lines, parses, counts, records problems |
+| `lib/analyse.loup` | dual | `log_lines` (a generator of numbered lines), `Analyser`: parses, counts, records problems |
 | `lib/reports.loup` | dual | `Cell`, `Table`, `percent_tenths`, `top_keys`, one function per report, `build_reports` |
-| `lib/render.loup` | dual | `render_text`, `render_csv` (`data.csv`) |
-| `lib/render_json.lpscr` | scripted | `render_json` (`system.json`) |
+| `lib/render.loup` | dual | `interface TableFormat` (default `render`), `TextFormat`, `CsvFormat` (`data.csv`) |
+| `lib/render_json.lpscr` | scripted | `JsonFormat` (`system.json`), overriding `render` |
 | `lib/sample.loup` | dual | `generate`, `parse_gen_args` |
 
 ### Parsing
@@ -55,7 +56,7 @@ and callers use `safe { }`.
 
 `Stats` holds per-path and per-client `Tally` values (requests, bytes, 4xx,
 5xx), a status → count map, 24 hourly tallies, and per-minute `Minute`
-values keyed by minutes since 1970 (`days_from_civil` × 1440 + hour × 60 +
+values keyed by minutes since 1970 (`daysFromCivil` × 1440 + hour × 60 +
 minute, on the time as written). A minute counts its requests, its errors
 (status ≥ `error_min`: 500, or 400 with `--include-4xx`) and its errors per
 path. First and last are chosen by time, not position.
@@ -104,12 +105,15 @@ are sorted by time and written with `format_entry`.
 
 - Usage errors (`parse_args` returns `Err`): message and the `Try` line on
   standard error, status 2, no output.
-- Inputs: the script checks `exists` and `isDir` before `readText`, because
-  the self-hosted `loup run` cannot catch `IoError`. A missing file or a
-  directory gives `logwatch: FILE: No such file or directory` / `Is a
-  directory`, status 1, and the remaining inputs are still read. A file that
-  exists but cannot be read ends the run with an uncaught `IoError`
-  (status 1).
+- Inputs: the script asks `input_problem` (`exists`, `isDir`, then
+  `test -r` through `io.proc`) before `readText`, because the self-hosted
+  `loup run` cannot catch `IoError`. A missing file, a directory or a file
+  without read permission gives `logwatch: FILE: No such file or
+  directory` / `Is a directory` / `Permission denied`, status 1, and the
+  remaining inputs are still read. A name holding `$`, a backquote, `"` or
+  `\` is not passed to `test` (that interpreter expands it in `sh`); if
+  such a read fails, Stage0 catches the `IoError` (`logwatch: FILE: cannot
+  be read`) and the self-hosted `loup run` ends with it.
 - Malformed lines are counted; their `FILE:LINE: reason` are kept in
   `Analyser.problems` and printed with `--strict` (status 1), otherwise
   summarised in one line on standard error.

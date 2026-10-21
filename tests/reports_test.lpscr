@@ -1,8 +1,9 @@
 @mode(host.scripted)
 
 # Unit tests for the report tables (lib/reports.loup), built from
-# tests/fixtures/access.log: percentages, top-N ordering, each report, and
-# how the bursts report splits and joins runs of minutes.
+# tests/fixtures/access.log: the generic comparator, percentages, top-N
+# ordering, each report, and how the bursts report splits and joins runs of
+# minutes.
 #
 # Runtime: host.scripted, run by the test runner: `make test` interprets
 # this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
@@ -13,7 +14,7 @@
 from debug.assert import (expect, expectEq);
 from ..lib.analyse import (Analyser);
 from ..lib.stats import (Stats, Tally, empty_tally);
-from ..lib.reports import (Cell, Table, percent_tenths, top_keys, summary_table, paths_table, status_table, hourly_table, bursts_table, build_reports);
+from ..lib.reports import (Cell, Table, ascending, percent_tenths, top_keys, summary_table, paths_table, status_table, hourly_table, bursts_table, build_reports);
 from ..lib.render import (cell_text);
 
 # tests/fixtures/access.log: 29 requests, 2 malformed lines, and 5xx
@@ -33,6 +34,16 @@ func row_text(t: Table, r: int): string {
         parts.push(cell_text(c, false));
     }
     return parts.join("|");
+}
+
+func test_ascending_orders_strings_and_ints(): void {
+    var names = ["/b", "/a", "/c"];
+    names.sort(ascending);
+    expectEq(names.join(" "), "/a /b /c", "strings");
+    var codes = [503, 200, 404];
+    codes.sort(ascending);
+    expectEq(str(codes[0]) + " " + str(codes[1]) + " " + str(codes[2]), "200 404 503", "ints");
+    expectEq(ascending("x", "x"), 0, "equal");
 }
 
 func test_percent_tenths_rounds_half_up(): void {

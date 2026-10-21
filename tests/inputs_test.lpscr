@@ -1,0 +1,43 @@
+@mode(host.scripted)
+
+# Unit tests for the input checks (lib/inputs.loup): a missing file, a
+# directory, a readable file, a file without read permission, and names
+# that are never handed to test(1).
+#
+# Runtime: host.scripted, run by the test runner: `make test` interprets
+# this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
+# test per `func test_*()`, from the repository root. It imports lib/ with
+# relative imports (`from ..lib.inputs`) and runs chmod and test(1) as
+# processes. It is not part of the program.
+
+from debug.assert import (expect, expectEq);
+from testing import (skipTest);
+from io.proc import (exitCode);
+from ..lib.inputs import (input_problem, readable);
+
+func test_missing_directory_and_readable(): void {
+    expectEq(input_problem("tests/fixtures/nope.log") ?? "", "No such file or directory", "missing");
+    expectEq(input_problem("tests/fixtures") ?? "", "Is a directory", "directory");
+    expect(input_problem("tests/fixtures/access.log").is_none(), "readable");
+    expect(readable("tests/fixtures/access.log"), "test -r");
+}
+
+func test_unreadable_file(): void {
+    # root reads every file, whatever its mode.
+    if (exitCode(["sh", "-c", "test \"$(id -u)\" != 0"]) != 0) {
+        skipTest("running as root");
+    }
+    let path = "tests/fixtures/.unreadable.tmp";
+    writeText(path, "x\n");
+    exitCode(["chmod", "000", path]);
+    let problem = input_problem(path) ?? "";
+    exitCode(["chmod", "600", path]);
+    exitCode(["rm", "-f", path]);
+    expectEq(problem, "Permission denied", "mode 000");
+}
+
+func test_shell_special_names_are_not_checked(): void {
+    # Names that `loup run` would expand in a shell are assumed readable.
+    expect(readable("no$such`file"), "dollar and backquote");
+    expect(readable("no\"such\\file"), "quote and backslash");
+}

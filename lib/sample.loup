@@ -7,7 +7,7 @@
 #
 # Runtime: host.dual, but only ever interpreted here: bin/loggen.lpscr
 # imports it under `loup run`, and tests/sample_test.lpscr under Stage0's
-# test runner (`loup-bootstrap test`). Being host.dual keeps it compilable.
+# test runner (`loup-bootstrap test`). host.dual keeps it typed.
 #
 # Structure: the traffic model (weight tables), Dice (seeded uniform and
 # weighted choices), one function per field of a line (client, status,
@@ -92,31 +92,29 @@ func client(edits dice: Dice): string {
     return i"{$ net $}.{$ 10 + n * 7 $}";
 }
 
+# The status of an ordinary request. The roll is drawn for every request,
+# even where the path alone decides, so that each line uses the dice the
+# same number of times. Arms are tried in order: forbidden and missing
+# paths first, then 0.5% server errors, then 30% of static files answered
+# `304 Not Modified` from the client's cache.
 func status_for(edits dice: Dice, target: string): int {
-    let path = path_of(target);
     var roll = 0;
     safe {
         roll = dice.below(1000);
     }
-    if (path == "/admin") {
-        return 403;
-    }
-    if (path == "/wp-login.php") {
-        return 404;
-    }
-    if (roll < 5) {
-        return 500;
-    }
-    if (path.startsWith("/static/") and roll < 300) {
-        return 304;
-    }
-    return 200;
+    return match path_of(target) {
+        "/admin" => 403,
+        "/wp-login.php" => 404,
+        _ if (roll < 5) => 500,
+        path if (path.startsWith("/static/") and roll < 300) => 304,
+        _ => 200,
+    };
 }
 
 func bytes_for(edits dice: Dice, target: string, status: int): int {
     var size = 0;
     safe {
-        size = if (target.startsWith("/static/")) { 20000 + dice.below(60000) } else if (target.startsWith("/api/")) { 300 + dice.below(4000) } else { 2000 + dice.below(9000) };
+        size = if (target.startsWith("/static/")) { 20_000 + dice.below(60_000) } else if (target.startsWith("/api/")) { 300 + dice.below(4_000) } else { 2_000 + dice.below(9_000) };
     }
     if (status == 304 or status >= 500) {
         return 0;
@@ -199,7 +197,7 @@ pub func generate(lines: int, seed: int, combined: bool): list[string] {
     return out;
 }
 
-func number(value: string): Option[int] {
+func number(value: string): int? {
     if (!isDigits(value) or value.len() > 9) {
         return None;
     }

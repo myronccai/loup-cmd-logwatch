@@ -1,0 +1,46 @@
+@mode(host.dual)
+
+# Input checks for logwatch: whether a named input can be read, and if not,
+# the message to give instead of reading it.
+#
+# Runtime: host.dual, but only ever interpreted here: bin/logwatch.lpscr
+# imports it under `loup run`, and tests/inputs_test.lpscr under Stage0's
+# test runner (`loup-bootstrap test`). It is not compilable: the list
+# method any exists only in the interpreters. host.dual still keeps it
+# typed.
+#
+# Why check at all: the self-hosted `loup run` cannot catch the IoError
+# that readText throws, so a file that cannot be read would end the whole
+# run. io.fs has no permission test, so readable() asks test(1).
+
+from io.fs import (isDir);
+from io.proc import (exitCode);
+
+# Characters that the self-hosted `loup run` would expand or choke on: it
+# hands each argument of a process to sh inside double quotes.
+let SHELL_SPECIAL: list[string] = ["$", "`", "\"", "\\"];
+
+# Whether `path` can be opened for reading, by `test -r` (status 1 means
+# no). A path with a character from SHELL_SPECIAL is not handed to a
+# process at all, and counts as readable: logwatch then just reads it.
+pub func readable(path: string): bool {
+    if (SHELL_SPECIAL.any(func(c: string): bool { return path.index_of(c) >= 0; })) {
+        return true;
+    }
+    return exitCode(["test", "-r", path]) != 1;
+}
+
+# Why `path` cannot be read, in the words of the C library's messages, or
+# None when it can.
+pub func input_problem(path: string): string? {
+    if (!exists(path)) {
+        return Some("No such file or directory");
+    }
+    if (isDir(path)) {
+        return Some("Is a directory");
+    }
+    if (!readable(path)) {
+        return Some("Permission denied");
+    }
+    return None;
+}

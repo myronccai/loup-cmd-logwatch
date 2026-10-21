@@ -1,7 +1,8 @@
 @mode(host.scripted)
 
 # Unit tests for the renderers (lib/render.loup, lib/render_json.lpscr):
-# number formatting, bars, aligned text tables, CSV quoting, JSON types.
+# number formatting, bars, aligned text tables, CSV quoting, JSON types,
+# and the TableFormat interface's shared render().
 #
 # Runtime: host.scripted, run by the test runner: `make test` interprets
 # this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
@@ -10,8 +11,15 @@
 
 from debug.assert import (expect, expectEq);
 from ..lib.reports import (Cell, Table);
-from ..lib.render import (format_tenths, cell_text, bar, table_text, render_text, table_csv, render_csv);
-from ..lib.render_json import (render_json, cell_value);
+from ..lib.render import (TableFormat, TextFormat, CsvFormat, format_tenths, cell_text, bar, table_text, table_csv);
+from ..lib.render_json import (JsonFormat, cell_value);
+
+# A format that only implements table(): render() comes from TableFormat.
+class NamesOnly implements TableFormat {
+    pub func table(t: Table): string {
+        return t.name;
+    }
+}
 
 func small(): Table {
     return Table(
@@ -78,13 +86,19 @@ func test_empty_table_says_none(): void {
 }
 
 func test_render_text_separates_tables(): void {
-    expectEq(render_text([summary(), summary()]), "Summary\n  lines  31\n  first  x\n\nSummary\n  lines  31\n  first  x\n", "two tables");
+    expectEq(TextFormat().render([summary(), summary()]), "Summary\n  lines  31\n  first  x\n\nSummary\n  lines  31\n  first  x\n", "two tables");
+}
+
+func test_default_render_joins_tables(): void {
+    expectEq(NamesOnly().render([summary(), small()]), "summary\n\npaths\n", "blank line between, newline at the end");
+    let none: list[Table] = [];
+    expectEq(NamesOnly().render(none), "\n", "no tables");
 }
 
 func test_csv_quotes_fields(): void {
     let want = "report,rank,path,requests,percent\npaths,1,\"/a,b\",12,80.0\npaths,2,\"/say \"\"hi\"\"\",3,20.0";
     expectEq(table_csv(small()), want, "csv");
-    expectEq(render_csv([summary()]), "report,field,value\nsummary,lines,31\nsummary,first,x\n", "keyed csv");
+    expectEq(CsvFormat().render([summary()]), "report,field,value\nsummary,lines,31\nsummary,first,x\n", "keyed csv");
 }
 
 # (system.json's parse cannot be used here: a program that imports data.csv,
@@ -113,6 +127,7 @@ func test_json_types(): void {
         "}",
         "",
     ].join("\n");
-    expectEq(render_json([summary(), small()]), want, "json");
+    expectEq(JsonFormat().render([summary(), small()]), want, "json");
+    expectEq(JsonFormat().table(summary()), "{\n  \"lines\": 31,\n  \"first\": \"x\"\n}\n", "one table");
     expectEq(cell_value(Cell.Tenths(value = 333)) as float, 33.3, "tenths are a number");
 }

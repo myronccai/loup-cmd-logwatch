@@ -202,8 +202,10 @@ malformed lines, `2` usage error.
   `bin/loggen.lpscr` are `host.scripted` programs: top-level statements that
   read arguments and files, print, and call `exit(n)`. Everything they share
   (the log format, counting, report tables, text and CSV output) is
-  `host.dual` code in `lib/*.loup`, which unit tests import directly and
-  which could later be compiled into a native program unchanged.
+  `host.dual` code in `lib/*.loup`, which unit tests import directly.
+  host.dual keeps that code typed; several modules also use features only
+  the interpreters have (generators, template fences, list `map`, `filter`
+  and `reduce`, spread), so they are not compiled.
 - **Relative imports across directories.** A script's package root is its
   own directory, so `bin/` scripts import `from ..lib.clf import (...)`,
   `lib/` modules import each other with `from .clf import (...)`, and tests
@@ -218,12 +220,23 @@ malformed lines, `2` usage error.
   cut the line into fields. The regex engine is written in Loup, so the
   parser class remembers every distinct timestamp and request it matched.
 - **Report data separate from presentation.** Reports are tables of typed
-  cells (an `enum Cell { Text, Count, Tenths }`), rendered by three
-  functions; percentages are integer tenths, so there is no float
-  formatting.
+  cells (an `enum Cell { Text, Count, Tenths }`), rendered by three classes
+  that implement an `interface TableFormat`: text and CSV write one table
+  at a time and share the interface's default `render()`, JSON overrides
+  it. Percentages are integer tenths, so there is no float formatting.
+- **Language features where the code needs them:** a `gen func` that
+  yields `(number, line)` tuples to a destructuring `for`; a generic
+  `ascending[T]` with a `where T: Comparable[T]` bound that sorts names and
+  status codes alike; property getters (`Stats.client_errors`); struct
+  copies with `with (...)`; `match` arms with guards (loggen's status
+  rules); `T?` return types; a generic type alias; list spread and
+  `map`/`filter`/`reduce`; `!` on regex groups the pattern guarantees; a
+  local `const`; a `(text)` template fence for `--help` and a `"""` string
+  for loggen's; and `catch (IoError)` without a binding.
 - **`data.csv` and `system.json`** for output, **`core.random`** for a
-  deterministic generator, and **classes with `modifier` methods** called
-  inside `safe { }`.
+  deterministic generator, **`core.datetime`**'s day count for minute
+  keys, **`io.proc`** to ask `test -r`, and **classes with `modifier`
+  methods** called inside `safe { }`.
 - **Testing a script project.** `make check` type-checks each entry script
   with `loup-bootstrap check FILE`; unit tests are `tests/*_test.lpscr`;
   `tests/e2e.sh` runs the scripts with `loup run` against expected output.
@@ -237,9 +250,15 @@ malformed lines, `2` usage error.
   standard input), and there is no follow mode.
 - Times are used as written: the zone offset is shown but not applied, so a
   log is assumed to use one zone.
-- A file that exists but cannot be read (permissions) ends the run with
-  `IoError` and status 1: the self-hosted `loup run` cannot catch `IoError`,
-  so logwatch checks only that each file exists and is not a directory.
+- A file without read permission is reported (`logwatch: FILE: Permission
+  denied`, status 1) and skipped, like a missing one. The self-hosted
+  `loup run` cannot catch `IoError` and `io.fs` has no permission test, so
+  logwatch asks `test -r` first. That interpreter hands each argument of a
+  process to `sh` inside double quotes, so a name holding `$`, a backquote,
+  `"` or `\` is not checked: if such a file cannot be read, `loup run`
+  still ends with `IoError`. Stage0 (`loup-bootstrap run`, and `loup` on
+  macOS, Windows and Linux arm64) catches it: `logwatch: FILE: cannot be
+  read`.
 
 ## Layout
 
@@ -248,13 +267,14 @@ bin/logwatch.lpscr          # the analyser (host.scripted entry script)
 bin/loggen.lpscr            # the sample log generator (host.scripted)
 lib/appinfo.loup            # name, version, exit statuses
 lib/args.loup               # option parsing
-lib/usage.loup              # --help and --version text
+lib/usage.loup              # --help and --version text (a template fence)
+lib/inputs.loup             # input checks: missing, directory, unreadable
 lib/clf.loup                # log line parser (system.regex), Entry, format_entry
 lib/stats.loup              # counters
-lib/analyse.loup            # feeds a log's text through the parser into the counters
+lib/analyse.loup            # log_lines generator; feeds each line through the parser into the counters
 lib/reports.loup            # report tables
-lib/render.loup             # text and CSV output
-lib/render_json.lpscr       # JSON output (host.scripted: uses Any)
+lib/render.loup             # interface TableFormat; text and CSV output
+lib/render_json.lpscr       # JsonFormat (host.scripted: uses Any)
 lib/sample.loup             # the generator behind loggen
 tests/*_test.lpscr          # unit tests (make test)
 tests/e2e.sh                # end-to-end tests with loup run (make e2e)

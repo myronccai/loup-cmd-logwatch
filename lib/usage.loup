@@ -4,35 +4,39 @@
 #
 # Runtime: host.dual, but only ever interpreted here: bin/logwatch.lpscr
 # imports it under `loup run`, and tests/e2e.sh checks its output there.
-# Being host.dual keeps it compilable.
+# It is not compilable: the native back end cannot render template fences.
+# host.dual still keeps it typed.
 
 from .appinfo import (APP_NAME, APP_VERSION);
 
+# The help text, as a plain-text template. A fence keeps the text as it
+# will be printed: the indentation of the line that opens it is removed
+# from every line, and {$ ... $} inserts a value from this function.
 pub func usage(): string {
-    let lines = [
-        i"usage: {$ APP_NAME $} [OPTION]... [FILE]...",
-        "",
-        "Analyse web server access logs in Common or Combined Log Format.",
-        "With no FILE, or when FILE is -, read standard input.",
-        "",
-        "  -f, --format FORMAT        output format: text (default), csv or json",
-        "  -r, --report NAMES         comma-separated reports to print, in order",
-        "                             (default all): summary, paths, status,",
-        "                             hourly, clients, bursts",
-        "  -n, --top N                rows in the paths and clients reports (default 10)",
-        "  -t, --burst-threshold N    errors a minute that make a burst (default 5)",
-        "  -4, --include-4xx          count 4xx responses as errors in bursts",
-        "  -s, --strict               list malformed lines and exit with status 1",
-        "  -h, --help                 display this help and exit",
-        "  -V, --version              output version information and exit",
-        "",
-        "Under `loup run`, long options go after `--`:",
-        i"  loup run bin/{$ APP_NAME $}.lpscr -- --format json access.log",
-        "",
-        "Exit status: 0 success, 1 unreadable input or malformed lines with",
-        "--strict, 2 usage error.",
-    ];
-    return lines.join("\n");
+    let text = ```(text):(none)
+    usage: {$ APP_NAME $} [OPTION]... [FILE]...
+
+    Analyse web server access logs in Common or Combined Log Format.
+    With no FILE, or when FILE is -, read standard input.
+
+      -f, --format FORMAT        output format: text (default), csv or json
+      -r, --report NAMES         comma-separated reports to print, in order
+                                 (default all): summary, paths, status,
+                                 hourly, clients, bursts
+      -n, --top N                rows in the paths and clients reports (default 10)
+      -t, --burst-threshold N    errors a minute that make a burst (default 5)
+      -4, --include-4xx          count 4xx responses as errors in bursts
+      -s, --strict               list malformed lines and exit with status 1
+      -h, --help                 display this help and exit
+      -V, --version              output version information and exit
+
+    Under `loup run`, long options go after `--`:
+      loup run bin/{$ APP_NAME $}.lpscr -- --format json access.log
+
+    Exit status: 0 success, 1 unreadable input or malformed lines with
+    --strict, 2 usage error.
+    ```;
+    return text.render({});
 }
 
 pub func version_line(): string {

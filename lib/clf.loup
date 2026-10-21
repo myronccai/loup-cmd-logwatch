@@ -9,13 +9,15 @@
 # Runtime: host.dual, but only ever interpreted here: lib/analyse.loup and
 # lib/sample.loup bring it into bin/logwatch.lpscr and bin/loggen.lpscr
 # under `loup run`, and the unit tests run it under Stage0's test runner
-# (`loup-bootstrap test`). Being host.dual keeps it compilable.
+# (`loup-bootstrap test`). It is not compilable: system.text's padStart
+# does not link natively, and `!` on an Option works only when interpreted.
+# host.dual still keeps it typed.
 #
 # Structure: the record types (Stamp, Request, Entry); ClfParser, which
 # cuts a line into fields left to right; then the field helpers (quotes
-# and escapes), the date arithmetic the reports group by, and the writer
-# (make_stamp, format_entry) that loggen uses, so both programs agree on
-# the format.
+# and escapes), the minute and second indexes the reports group by (on
+# core.datetime's day count), and the writer (make_stamp, format_entry)
+# that loggen uses, so both programs agree on the format.
 #
 # A line is cut into fields with plain string searches. The two fields that
 # have a grammar of their own, the timestamp and the request line, are
@@ -26,6 +28,7 @@
 from system.regex import (Regex);
 from system.text import (padStart);
 from core.string_utils import (isDigits);
+from core.datetime import (daysFromCivil);
 
 pub let MONTHS: list[string] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -92,15 +95,17 @@ pub class ClfParser {
             Some(found) => found,
             None => { return Err(i"bad timestamp '{$ text $}'"); },
         };
-        let month = MONTHS.index_of(m.groupByName("month").unwrap_or("")) + 1;
+        # Every group of STAMP_PATTERN takes part in a match, so `!` cannot
+        # fail here.
+        let month = MONTHS.index_of(m.groupByName("month")!) + 1;
         let stamp = Stamp(
-            year = m.groupByName("year").unwrap_or("0").toInt(),
+            year = m.groupByName("year")!.toInt(),
             month = month,
-            day = m.groupByName("day").unwrap_or("0").toInt(),
-            hour = m.groupByName("hour").unwrap_or("0").toInt(),
-            minute = m.groupByName("minute").unwrap_or("0").toInt(),
-            second = m.groupByName("second").unwrap_or("0").toInt(),
-            zone = m.groupByName("zone").unwrap_or(""),
+            day = m.groupByName("day")!.toInt(),
+            hour = m.groupByName("hour")!.toInt(),
+            minute = m.groupByName("minute")!.toInt(),
+            second = m.groupByName("second")!.toInt(),
+            zone = m.groupByName("zone")!,
             text = text,
         );
         if (month == 0 or stamp.day < 1 or stamp.day > 31 or stamp.hour > 23 or stamp.minute > 59 or stamp.second > 60) {
@@ -116,11 +121,13 @@ pub class ClfParser {
             Some(known) => { return known; },
             None => {},
         }
+        # The protocol group is optional (`GET /` is accepted); the others
+        # are always there when the pattern matches.
         let req = match this.request_re.findFirst(text) {
             Some(m) => {
-                let target = m.groupByName("target").unwrap_or("");
+                let target = m.groupByName("target")!;
                 Request(
-                    method = m.groupByName("method").unwrap_or(""),
+                    method = m.groupByName("method")!,
                     target = target,
                     path = path_of(target),
                     protocol = m.groupByName("protocol").unwrap_or(""),
@@ -135,15 +142,17 @@ pub class ClfParser {
     # Parses one log line (without its newline). Each step slices off the
     # field it read, so `rest` is always the unread end of the line.
     pub modifier func parse(line: string): Result[Entry, string] {
+        # The reason given when the first fields are not even there.
+        const SHAPE: string = "expected HOST IDENT USER [TIME] \"REQUEST\" STATUS BYTES";
         let host_end = line.index_of(" ");
         if (host_end <= 0) {
-            return Err("expected HOST IDENT USER [TIME] \"REQUEST\" STATUS BYTES");
+            return Err(SHAPE);
         }
         let host = line.slice(0, host_end);
         var rest = line.slice(host_end + 1);
         let ident_end = rest.index_of(" ");
         if (ident_end <= 0) {
-            return Err("expected HOST IDENT USER [TIME] \"REQUEST\" STATUS BYTES");
+            return Err(SHAPE);
         }
         let ident = rest.slice(0, ident_end);
         rest = rest.slice(ident_end + 1);
@@ -307,20 +316,10 @@ pub func escape(text: string): string {
     return text.replace("\\", "\\\\").replace("\"", "\\\"");
 }
 
-# Days from 1970-01-01 to the given civil date (proleptic Gregorian).
-pub func days_from_civil(year: int, month: int, day: int): int {
-    let y = if (month <= 2) { year - 1 } else { year };
-    let era = (if (y >= 0) { y } else { y - 399 }) / 400;
-    let yoe = y - era * 400;
-    let mp = (month + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + doe - 719468;
-}
-
 # Minutes since 1970-01-01 00:00 of the time as written (zone not applied).
+# core.datetime counts the days, in the proleptic Gregorian calendar.
 pub func minute_index(s: Stamp): int {
-    return days_from_civil(s.year, s.month, s.day) * 1440 + s.hour * 60 + s.minute;
+    return daysFromCivil(s.year, s.month, s.day) * 1440 + s.hour * 60 + s.minute;
 }
 
 # Seconds since 1970-01-01 00:00:00 of the time as written.

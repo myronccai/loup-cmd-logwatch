@@ -5,10 +5,29 @@
 #
 # Runtime: host.dual, but only ever interpreted here: bin/logwatch.lpscr
 # imports it under `loup run`, and the unit tests under Stage0's test
-# runner (`loup-bootstrap test`). Being host.dual keeps it compilable.
+# runner (`loup-bootstrap test`). It is not compilable: the native back end
+# has no generators (`gen func`). host.dual still keeps it typed.
+#
+# Structure: log_lines, a generator that yields the numbered non-blank
+# lines of a text, and the Analyser, which parses each one and counts it or
+# records why it could not be parsed.
 
 from .clf import (ClfParser, Entry);
 from .stats import (Stats);
+
+# The lines of `text` that hold something, each with its 1-based line
+# number: the `\r` of a CRLF line is dropped (it stays after the split on
+# `\n`) and empty lines are skipped, but still counted.
+pub gen func log_lines(text: string): Iterable[(int, string)] {
+    var number = 0;
+    for (raw in text.split("\n")) {
+        number += 1;
+        let line = if (raw.endsWith("\r")) { raw.slice(0, raw.len() - 1) } else { raw };
+        if (line.len() > 0) {
+            yield (number, line);
+        }
+    }
+}
 
 pub class Analyser {
     pub let stats: Stats;
@@ -27,14 +46,7 @@ pub class Analyser {
         safe {
             this.stats.add_file();
         }
-        var number = 0;
-        for (raw in text.split("\n")) {
-            number += 1;
-            # Lines of a CRLF log keep their `\r` after the split on `\n`.
-            let line = if (raw.endsWith("\r")) { raw.slice(0, raw.len() - 1) } else { raw };
-            if (line.len() == 0) {
-                continue;
-            }
+        for ((number, line) in log_lines(text)) {
             var parsed: Result[Entry, string] = Err("");
             safe {
                 parsed = this.parser.parse(line);

@@ -9,11 +9,11 @@
 #
 # Runtime: host.dual, but only ever interpreted here: bin/logwatch.lpscr
 # imports it under `loup run`, and tests/args_test.lpscr under Stage0's
-# test runner (`loup-bootstrap test`). Being host.dual keeps it compilable.
+# test runner (`loup-bootstrap test`). host.dual keeps it typed.
 #
 # Structure: parse_args works in two passes. The first only reads the
-# syntax, turning every word into a file or an (option, value) step; the
-# second applies the steps in order and validates their values. Usage
+# syntax, turning every word into a file or an (option, value) tuple; the
+# second applies those steps in order and validates their values. Usage
 # errors come back as Err(message) for the script to print.
 
 from core.string_utils import (isDigits);
@@ -78,7 +78,7 @@ pub func parse_reports(value: string): Result[list[string], string] {
 }
 
 # A whole number of at least 1.
-pub func parse_positive(value: string): Option[int] {
+pub func parse_positive(value: string): int? {
     if (!isDigits(value) or value.len() > 9 or value.toInt() < 1) {
         return None;
     }
@@ -97,9 +97,8 @@ pub func parse_args(argv: list[string]): Result[Options, string] {
     var files: list[string] = [];
 
     # Expand the arguments into (option, value) steps first: `-s4fjson`
-    # becomes --strict, --include-4xx, --format=json.
-    var names: list[string] = [];
-    var values: list[string] = [];
+    # becomes ("--strict", ""), ("--include-4xx", ""), ("--format", "json").
+    var steps: list[tuple[string, string]] = [];
     var only_files = false;
     var i = 0;
     while (i < argv.len()) {
@@ -136,8 +135,7 @@ pub func parse_args(argv: list[string]): Result[Options, string] {
             } else if (!takes_value(name) and has_value) {
                 return Err(i"option '{$ name $}' doesn't allow an argument");
             }
-            names.push(name);
-            values.push(value);
+            steps.push((name, value));
             continue;
         }
         # A cluster of short options.
@@ -161,16 +159,13 @@ pub func parse_args(argv: list[string]): Result[Options, string] {
                     return Err(i"option requires an argument -- '{$ letter $}'");
                 }
             }
-            names.push(name);
-            values.push(value);
+            steps.push((name, value));
         }
     }
 
     # Apply the steps in order: a repeated option overrides the earlier one
     # (`-f csv -f json` gives json).
-    for (k in 0..names.len()) {
-        let name = names[k];
-        let value = values[k];
+    for ((name, value) in steps) {
         if (name == "--format") {
             if (value != "text" and value != "csv" and value != "json") {
                 return Err(i"invalid format '{$ value $}' (choose text, csv or json)");

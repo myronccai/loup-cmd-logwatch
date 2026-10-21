@@ -17,7 +17,15 @@
 from ..lib.appinfo import (APP_VERSION, EXIT_OK, EXIT_USAGE);
 from ..lib.sample import (GenOptions, generate, parse_gen_args);
 
-let USAGE = "usage: loggen [-n LINES] [-s SEED] [-c]\n\nWrite LINES (default 1000) access log lines for one day in Combined Log\nFormat, or Common Log Format with -c. The same SEED (default 1) gives the\nsame log.";
+# The help text, also printed after a usage error. In a """ string the
+# newline after the opening quotes is dropped, and the text ends where the
+# closing quotes are.
+let USAGE = """
+usage: loggen [-n LINES] [-s SEED] [-c]
+
+Write LINES (default 1000) access log lines for one day in Combined Log
+Format, or Common Log Format with -c. The same SEED (default 1) gives the
+same log.""";
 
 let parsed = parse_gen_args(args());
 if (parsed.is_err()) {

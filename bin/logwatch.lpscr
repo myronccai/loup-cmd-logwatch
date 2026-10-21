@@ -15,18 +15,31 @@
 # Structure: this script is the top level, the only code that reads files,
 # prints and sets the exit status. It parses the command line (usage errors
 # exit 2), handles --help and --version, feeds each input to one Analyser,
-# builds the requested report tables, prints them as text, CSV or JSON, and
-# finally reports malformed lines. The parsing, counting and formatting it
-# calls are the modules in lib/.
+# builds the requested report tables, prints them in the TableFormat that
+# -f names, and finally reports malformed lines. The parsing, counting and
+# formatting it calls are the modules in lib/.
 
-from io.fs import (isDir);
 from ..lib.appinfo import (APP_NAME, EXIT_OK, EXIT_FAILURE, EXIT_USAGE);
 from ..lib.args import (Options, parse_args);
 from ..lib.usage import (usage, version_line);
+from ..lib.inputs import (input_problem);
 from ..lib.analyse import (Analyser);
 from ..lib.reports import (build_reports);
-from ..lib.render import (render_text, render_csv);
-from ..lib.render_json import (render_json);
+from ..lib.render import (TableFormat, TextFormat, CsvFormat);
+from ..lib.render_json import (JsonFormat);
+
+# The output format that `-f NAME` asks for. (A function with a return per
+# branch: Stage0 types an `if` expression whose branches are different
+# classes as Any, even where both implement TableFormat.)
+func output_format(name: string): TableFormat {
+    if (name == "json") {
+        return JsonFormat();
+    }
+    if (name == "csv") {
+        return CsvFormat();
+    }
+    return TextFormat();
+}
 
 let parsed = parse_args(args());
 if (parsed.is_err()) {
@@ -45,8 +58,8 @@ if (opts.version) {
 }
 
 # Every input goes into the same Analyser, so the reports cover all files
-# together. A missing file or a directory is reported and skipped; the
-# others are still analysed and the exit status becomes 1.
+# together. A missing, unreadable or directory input is reported and
+# skipped; the others are still analysed and the exit status becomes 1.
 let analyser = Analyser(if (opts.include_4xx) { 400 } else { 500 });
 var status = EXIT_OK;
 var inputs = 0;
@@ -54,18 +67,25 @@ for (file in opts.files) {
     let path = if (file == "-") { "/dev/stdin" } else { file };
     # Check before reading: under the self-hosted `loup run` an IoError from
     # readText cannot be caught.
-    if (!exists(path)) {
-        printErr(i"{$ APP_NAME $}: {$ file $}: No such file or directory");
-        status = EXIT_FAILURE;
-        continue;
-    }
-    if (isDir(path)) {
-        printErr(i"{$ APP_NAME $}: {$ file $}: Is a directory");
+    let problem = input_problem(path);
+    if (problem.is_some()) {
+        printErr(i"{$ APP_NAME $}: {$ file $}: {$ problem.unwrap() $}");
         status = EXIT_FAILURE;
         continue;
     }
     let name = if (file == "-") { "(standard input)" } else { file };
-    let text = readText(path);
+    # A read can still fail: a name the check could not pass to test(1), or
+    # a file changed since. Interpreters that can catch the IoError (Stage0,
+    # which is `loup` on macOS, Windows and Linux arm64) skip the input;
+    # under the self-hosted `loup run` the run ends with the IoError.
+    var text = "";
+    try {
+        text = readText(path);
+    } catch (IoError) {
+        printErr(i"{$ APP_NAME $}: {$ file $}: cannot be read");
+        status = EXIT_FAILURE;
+        continue;
+    }
     safe {
         analyser.feed(name, text);
     }
@@ -77,13 +97,7 @@ if (inputs == 0) {
 }
 
 let tables = build_reports(analyser.stats, opts.reports, opts.top, opts.burst_threshold);
-if (opts.format == "json") {
-    print(render_json(tables));
-} else if (opts.format == "csv") {
-    print(render_csv(tables));
-} else {
-    print(render_text(tables));
-}
+print(output_format(opts.format).render(tables));
 
 # Malformed lines never stop the analysis. By default they cost one summary
 # line on stderr; --strict lists each one and turns the status into 1.

@@ -1,8 +1,9 @@
 @mode(host.scripted)
 
 # Unit tests for the analyser (lib/analyse.loup) and the counters it fills
-# (lib/stats.loup): totals, tallies, first/last by time, blank and CRLF
-# lines, problems, and error minutes.
+# (lib/stats.loup): the line generator, totals, tallies, first/last by
+# time, blank and CRLF lines, problems, error minutes, the error totals
+# derived from the hours, and counting an entry into a tally.
 #
 # Runtime: host.scripted, run by the test runner: `make test` interprets
 # this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
@@ -10,8 +11,9 @@
 # (`from ..lib.analyse`). It is not part of the program.
 
 from debug.assert import (expect, expectEq);
-from ..lib.analyse import (Analyser);
-from ..lib.stats import (Stats, Tally, empty_tally);
+from ..lib.clf import (ClfParser, Entry);
+from ..lib.analyse import (Analyser, log_lines);
+from ..lib.stats import (Stats, Tally, empty_tally, counted);
 
 let A = "192.0.2.1 - - [10/Oct/2026:10:00:00 +0000] \"GET /a HTTP/1.1\" 200 100";
 let B = "192.0.2.2 - - [10/Oct/2026:09:00:00 +0000] \"GET /b HTTP/1.1\" 404 10";
@@ -85,6 +87,39 @@ func test_empty_input(): void {
     expectEq(s.lines, 0, "no lines");
     expectEq(s.first, "", "no first");
     expectEq(s.hours.len(), 24, "24 hours");
+}
+
+func test_log_lines_numbers_the_lines_that_hold_something(): void {
+    var got: list[string] = [];
+    for ((number, line) in log_lines("a\r\n\nb\n  \nc")) {
+        got.push(str(number) + ":" + line);
+    }
+    expectEq(got.join("|"), "1:a|3:b|4:  |5:c", "CR dropped, empty lines skipped but counted");
+    var none = 0;
+    for ((number, line) in log_lines("")) {
+        none += 1;
+    }
+    expectEq(none, 0, "no lines in empty text");
+}
+
+func test_error_totals_come_from_the_hours(): void {
+    let s = analyse(A + "\n" + B + "\n" + C + "\n" + B + "\n", 500).stats;
+    expectEq(s.client_errors, 2, "two 404s");
+    expectEq(s.server_errors, 1, "one 503");
+}
+
+func test_counted_returns_a_new_tally(): void {
+    let p = ClfParser();
+    var e: Result[Entry, string] = Err("not run");
+    safe {
+        e = p.parse(C);
+    }
+    let before = empty_tally();
+    let after = counted(before, e.unwrap());
+    expectEq(after.requests, 1, "one request");
+    expectEq(after.server_errors, 1, "503 is a server error");
+    expectEq(after.client_errors, 0, "not a client error");
+    expectEq(before.requests, 0, "the original is unchanged");
 }
 
 func test_empty_tally(): void {

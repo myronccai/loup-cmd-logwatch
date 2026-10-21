@@ -46,9 +46,9 @@ test:
 	done; exit $$status
 
 # End-to-end tests: run the scripts with `loup run` and compare their output
-# and exit status with the expected ones.
+# and exit status with the expected ones (one case runs under Stage0).
 e2e:
-	bash tests/e2e.sh $(LOUP)
+	LOUP_BOOTSTRAP=$(LOUP_BOOTSTRAP) bash tests/e2e.sh $(LOUP)
 
 # Everything CI runs, ending with a smoke test of the entry script.
 ci: check test e2e

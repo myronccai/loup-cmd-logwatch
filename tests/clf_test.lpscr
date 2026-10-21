@@ -10,7 +10,7 @@
 # (`from ..lib.clf`). It is not part of the program.
 
 from debug.assert import (expect, expectEq);
-from ..lib.clf import (ClfParser, Entry, Stamp, path_of, closing_quote, unescape, escape, days_from_civil, minute_index, minute_label, make_stamp, format_entry);
+from ..lib.clf import (ClfParser, Entry, Stamp, path_of, closing_quote, unescape, escape, minute_index, second_index, minute_label, make_stamp, format_entry);
 
 let COMMON = "127.0.0.1 - frank [10/Oct/2000:13:55:36 -0700] \"GET /apache_pb.gif HTTP/1.0\" 200 2326";
 let COMBINED = "192.0.2.10 - - [10/Oct/2026:14:00:30 +0200] \"GET /a?b=1 HTTP/1.1\" 503 - \"https://www.example.com/\" \"Mozilla/5.0 \\\"Quoted\\\" Agent\"";
@@ -129,9 +129,11 @@ func test_unescape_and_escape(): void {
 }
 
 func test_days_and_minutes(): void {
-    expectEq(days_from_civil(1970, 1, 1), 0, "epoch");
-    expectEq(days_from_civil(2000, 3, 1), 11017, "2000-03-01");
-    expectEq(days_from_civil(2024, 2, 29) + 1, days_from_civil(2024, 3, 1), "leap day");
+    expectEq(minute_index(make_stamp(1970, 1, 1, 0, 0, 0, "+0000")), 0, "epoch");
+    expectEq(minute_index(make_stamp(2000, 3, 1, 0, 0, 0, "+0000")), 11017 * 1440, "2000-03-01");
+    let leap = make_stamp(2024, 2, 29, 23, 59, 59, "+0000");
+    let march = make_stamp(2024, 3, 1, 0, 0, 0, "+0000");
+    expectEq(second_index(march) - second_index(leap), 1, "leap day");
     let before = make_stamp(2026, 12, 31, 23, 59, 0, "+0000");
     let after = make_stamp(2027, 1, 1, 0, 0, 0, "+0000");
     expectEq(minute_index(after) - minute_index(before), 1, "across new year");

@@ -4,9 +4,12 @@
 # status with the expected ones.
 #
 # usage: tests/e2e.sh [LOUP]     (run from the repository root)
+# One case runs the script under Stage0 instead: $LOUP_BOOTSTRAP (default
+# loup-bootstrap).
 
 set -u
 LOUP=${1:-loup}
+LOUP_BOOTSTRAP=${LOUP_BOOTSTRAP:-loup-bootstrap}
 SCRIPT=bin/logwatch.lpscr
 LOG=tests/fixtures/access.log
 TMP=$(mktemp -d)
@@ -172,6 +175,26 @@ check_err "missing file"       1 $'logwatch: nope.log: No such file or directory
 check "missing file, no report" 1 '' nope.log
 check_err "directory"          1 $'logwatch: tests: Is a directory\n' tests
 check_grep "missing and present" 1 "$SUMMARY_FILES" $'summary,files,1\nsummary,lines,31\nsummary,requests,29\n' -r summary -f csv nope.log "$LOG"
+
+# A file without read permission is reported like a missing one (root can
+# read anything, so these cases need another user). Under `loup run` the
+# check is test(1); a name with `$` skips that check, and only Stage0 can
+# then catch the IoError of the read.
+if [ "$(id -u)" -ne 0 ]; then
+    cp "$LOG" "$TMP/locked.log"
+    cp "$LOG" "$TMP/we\$ird.log"
+    chmod 000 "$TMP/locked.log" "$TMP/we\$ird.log"
+    check_err "unreadable file" 1 "logwatch: $TMP/locked.log: Permission denied
+" -r summary "$TMP/locked.log"
+    check_grep "unreadable and present" 1 "$SUMMARY_FILES" $'summary,files,1\nsummary,lines,31\nsummary,requests,29\n' -r summary -f csv "$TMP/locked.log" "$LOG"
+    SAVED=$LOUP
+    LOUP=$LOUP_BOOTSTRAP
+    check_err "unreadable, caught by Stage0" 1 "logwatch: $TMP/we\$ird.log: cannot be read
+" -r summary "$TMP/we\$ird.log"
+    LOUP=$SAVED
+else
+    echo "e2e: running as root, unreadable-file cases skipped"
+fi
 
 USAGE_HINT="Try 'logwatch --help' for more information."
 check_err "unknown long option" 2 "logwatch: unrecognized option '--bogus'

@@ -1,15 +1,20 @@
 @mode(host.dual)
 
-# Text and CSV output of report tables. (JSON is in render_json.lpscr.)
+# Text and CSV output of report tables, behind the TableFormat interface
+# that the JSON output (render_json.lpscr) implements too.
 #
 # Runtime: host.dual, but only ever interpreted here: bin/logwatch.lpscr
 # imports it under `loup run`, and the unit tests under Stage0's test
-# runner (`loup-bootstrap test`). Being host.dual keeps it compilable.
+# runner (`loup-bootstrap test`). It is not compilable: system.text's
+# padStart and padEnd do not link natively, the list method map exists only
+# in the interpreters, and natively list spread gives wrong values.
+# host.dual still keeps it typed.
 #
-# Structure: cell formatting helpers, then the text renderer (table_text
-# measures every column before it writes a line, and draws a bar for the
-# table's bar column) and the CSV renderer (data.csv's writer does the
-# quoting). Both join tables with a blank line.
+# Structure: TableFormat, whose default render() joins the tables that a
+# format's table() writes; cell formatting helpers; the text renderer
+# (table_text measures every column before it writes a line, and draws a
+# bar for the table's bar column) and the CSV renderer (data.csv's writer
+# does the quoting); then the two formats, TextFormat and CsvFormat.
 #
 # This module imports data.csv, which in Loup 1.26.0 makes any
 # system.json `parse` in the same program run the CSV parser instead: the
@@ -20,6 +25,22 @@ from system.text import (padStart, padEnd);
 from .reports import (Cell, Table);
 
 const BAR_WIDTH: int = 40;
+
+# An output format for report tables. A format that writes each table on
+# its own (text, CSV) implements table() and inherits render(), which puts
+# a blank line between the tables and ends with a newline; a format whose
+# document is not a list of tables (JSON) overrides render() as well.
+pub interface TableFormat {
+    func table(t: Table): string;
+
+    func render(tables: list[Table]): string {
+        var parts: list[string] = [];
+        for (t in tables) {
+            parts.push(this.table(t));
+        }
+        return parts.join("\n\n") + "\n";
+    }
+}
 
 # `333` → `33.3`.
 pub func format_tenths(tenths: int): string {
@@ -145,39 +166,27 @@ pub func table_text(t: Table): string {
     return lines.join("\n");
 }
 
-# All tables as text, a blank line between them, ending with a newline.
-pub func render_text(tables: list[Table]): string {
-    var parts: list[string] = [];
-    for (t in tables) {
-        parts.push(table_text(t));
-    }
-    return parts.join("\n\n") + "\n";
-}
-
 # One table as CSV: a header row, then the rows, each starting with the
 # report name.
 pub func table_csv(t: Table): string {
-    var rows: list[list[string]] = [];
-    var header: list[string] = ["report"];
-    for (c in t.columns) {
-        header.push(c);
-    }
-    rows.push(header);
+    var rows: list[list[string]] = [["report", *t.columns]];
     for (row in t.rows) {
-        var fields: list[string] = [t.name];
-        for (c in row) {
-            fields.push(cell_text(c, false));
-        }
-        rows.push(fields);
+        let fields = row.map(func(c: Cell): string { return cell_text(c, false); });
+        rows.push([t.name, *fields]);
     }
     return write(rows, ",");
 }
 
-# All tables as CSV, a blank line between them, ending with a newline.
-pub func render_csv(tables: list[Table]): string {
-    var parts: list[string] = [];
-    for (t in tables) {
-        parts.push(table_csv(t));
+# Aligned text tables with a title each (the default output).
+pub class TextFormat implements TableFormat {
+    pub func table(t: Table): string {
+        return table_text(t);
     }
-    return parts.join("\n\n") + "\n";
+}
+
+# CSV, one block of rows per table.
+pub class CsvFormat implements TableFormat {
+    pub func table(t: Table): string {
+        return table_csv(t);
+    }
 }

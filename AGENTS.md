@@ -30,13 +30,14 @@ mistakes. Load those only as needed.
 ├── lib/                         # shared modules; host.dual unless noted
 │   ├── appinfo.loup             # APP_NAME, APP_VERSION, APP_SUMMARY, exit statuses
 │   ├── args.loup                # struct Options, parse_args()
-│   ├── usage.loup               # usage(), version_line()
+│   ├── usage.loup               # usage() (a template fence), version_line()
+│   ├── inputs.loup              # input_problem(): missing, directory, unreadable (test -r)
 │   ├── clf.loup                 # Stamp, Request, Entry, class ClfParser (system.regex), format_entry()
 │   ├── stats.loup               # Tally, Minute, class Stats (counters)
-│   ├── analyse.loup             # class Analyser: feed(name, text) → stats and problems
+│   ├── analyse.loup             # gen func log_lines(); class Analyser: feed(name, text) → stats and problems
 │   ├── reports.loup             # enum Cell, struct Table, one *_table() per report, build_reports()
-│   ├── render.loup              # render_text(), render_csv()
-│   ├── render_json.lpscr        # render_json(): host.scripted, because it uses Any
+│   ├── render.loup              # interface TableFormat, classes TextFormat, CsvFormat
+│   ├── render_json.lpscr        # class JsonFormat: host.scripted, because it uses Any
 │   └── sample.loup              # generate(), parse_gen_args() for loggen
 ├── tests/
 │   ├── *_test.lpscr             # unit tests: func test_*(): void
@@ -84,8 +85,15 @@ Toolchain facts this project depends on (Loup 1.26.0, Linux x86-64):
 - The self-hosted `loup run` does not process backslash escapes inside
   `i"..."` strings (`i"a\"b"` prints `a\"b`); Stage0 does, so unit tests do
   not catch it. Keep escapes in plain strings and concatenate.
-- The self-hosted `loup run` cannot catch `IoError`; check `exists`/`isDir`
-  before `readText`.
+- The self-hosted `loup run` cannot catch `IoError`; check inputs with
+  `lib/inputs.loup` `input_problem` (exists, isDir, `test -r`) before
+  `readText`. Its `exec` hands arguments to `sh` inside double quotes, so
+  never pass it a string holding `$`, a backquote, `"` or `\`.
+- A type alias cannot be imported from another module in 1.26.0
+  (`undefined type`, in both interpreters): declare it where it is used.
+- Under Stage0 an `if` expression whose branches are different classes is
+  typed `Any`, even when both implement the declared interface: use a
+  function with a `return` per branch (`output_format` in the script).
 - A program that imports `data.csv` gets the CSV parser when it calls
   `system.json.parse`. Do not use `system.json.parse` here.
 - `loup-bootstrap test` with all files at once fails random tests with an

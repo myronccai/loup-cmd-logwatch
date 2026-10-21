@@ -1,6 +1,7 @@
 @mode(host.scripted)
 
-# JSON output of report tables.
+# JSON output of report tables: the JsonFormat of render.loup's
+# TableFormat interface.
 #
 # Runtime: host.scripted. A module of the script bin/logwatch.lpscr,
 # interpreted with it by `loup run`; the unit tests import it under Stage0's
@@ -8,9 +9,15 @@
 # host.scripted: a JSON document is built from `Any` values, which host.dual
 # accepts but flags with a W_ANY_IN_AOT_MODE warning on every `loup run`. A
 # script module uses `Any` and the full standard library freely.
+#
+# Structure: cell_value and table_value turn a cell and a table into JSON
+# values; JsonFormat writes one table as a document of its own, and
+# overrides the interface's render() because a JSON report is one object
+# with a member per table, not tables separated by blank lines.
 
 from system.json import (stringifyIndented);
 from .reports import (Cell, Table);
+from .render import (TableFormat);
 
 # A cell as a JSON value: text as a string, counts as integers, tenths as a
 # number with one decimal place.
@@ -60,12 +67,19 @@ pub func table_value(t: Table): Any {
     return items;
 }
 
-# All tables as one JSON object with a member per report, ending with a
-# newline.
-pub func render_json(tables: list[Table]): string {
-    var doc: dict[string, Any] = {};
-    for (t in tables) {
-        doc[t.name] = table_value(t);
+pub class JsonFormat implements TableFormat {
+    # One table as a JSON document of its own.
+    pub func table(t: Table): string {
+        return stringifyIndented(table_value(t), 2) + "\n";
     }
-    return stringifyIndented(doc, 2) + "\n";
+
+    # All tables as one JSON object with a member per report, ending with
+    # a newline.
+    pub func render(tables: list[Table]): string {
+        var doc: dict[string, Any] = {};
+        for (t in tables) {
+            doc[t.name] = table_value(t);
+        }
+        return stringifyIndented(doc, 2) + "\n";
+    }
 }
