@@ -4,6 +4,16 @@
 # a daily rhythm, a few heavy clients, and an outage from 14:00 to 14:05 in
 # which most /api/ requests fail with 503. The same seed always gives the
 # same log.
+#
+# Runtime: host.dual, but only ever interpreted here: bin/loggen.lpscr
+# imports it under `loup run`, and tests/sample_test.lpscr under Stage0's
+# test runner (`loup-bootstrap test`). Being host.dual keeps it compilable.
+#
+# Structure: the traffic model (weight tables), Dice (seeded uniform and
+# weighted choices), one function per field of a line (client, status,
+# bytes, then entry for the whole Entry), generate (the outage lines first,
+# then ordinary traffic, all sorted by time and written with
+# clf.format_entry), and loggen's command-line parser.
 
 from core.random import (Random);
 from core.string_utils import (isDigits);
@@ -151,6 +161,9 @@ func entry(edits dice: Dice, second: int, target: string, status: int, combined:
 }
 
 # `lines` log lines in time order, as written by format_entry.
+# All randomness comes from one Dice, drawn in a fixed order, which is what
+# makes the log depend on the seed alone. A tenth of the lines fall in the
+# outage, so it shows up as an error burst at any size.
 pub func generate(lines: int, seed: int, combined: bool): list[string] {
     let dice = Dice(seed);
     let outage = lines / 10;

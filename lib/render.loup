@@ -1,6 +1,19 @@
 @mode(host.dual)
 
 # Text and CSV output of report tables. (JSON is in render_json.lpscr.)
+#
+# Runtime: host.dual, but only ever interpreted here: bin/logwatch.lpscr
+# imports it under `loup run`, and the unit tests under Stage0's test
+# runner (`loup-bootstrap test`). Being host.dual keeps it compilable.
+#
+# Structure: cell formatting helpers, then the text renderer (table_text
+# measures every column before it writes a line, and draws a bar for the
+# table's bar column) and the CSV renderer (data.csv's writer does the
+# quoting). Both join tables with a blank line.
+#
+# This module imports data.csv, which in Loup 1.26.0 makes any
+# system.json `parse` in the same program run the CSV parser instead: the
+# program writes JSON (render_json.lpscr) but never parses it.
 
 from data.csv import (write);
 from system.text import (padStart, padEnd);
@@ -94,6 +107,9 @@ pub func table_text(t: Table): string {
         cells.push(texts);
     }
 
+    # A column is as wide as its widest cell, and its name unless the table
+    # is keyed (no header line). It is right-aligned when its first row
+    # holds a number.
     var widths: list[int] = [];
     var right: list[bool] = [];
     for (col in 0..t.columns.len()) {

@@ -1,5 +1,13 @@
 @mode(host.scripted)
 
+# Unit tests for logwatch's command-line parser (lib/args.loup): defaults,
+# short and long options, `--`, report lists, numbers and usage errors.
+#
+# Runtime: host.scripted, run by the test runner: `make test` interprets
+# this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
+# test per `func test_*()`. It imports lib/ with relative imports
+# (`from ..lib.args`). It is not part of the program.
+
 from debug.assert import (expect, expectEq);
 from ..lib.args import (Options, parse_args, parse_reports, parse_positive);
 

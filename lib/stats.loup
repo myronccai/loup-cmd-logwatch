@@ -1,6 +1,16 @@
 @mode(host.dual)
 
 # Counters for everything the reports show, filled one entry at a time.
+#
+# Runtime: host.dual, but only ever interpreted here: lib/analyse.loup
+# brings it into bin/logwatch.lpscr under `loup run`, and the unit tests
+# run it under Stage0's test runner (`loup-bootstrap test`). Being host.dual
+# keeps it compilable.
+#
+# Structure: Tally (requests, bytes and errors for one key) and Minute (one
+# minute of traffic) are value records; Stats owns the totals and the
+# per-path, per-client, per-status, per-hour and per-minute maps. Nothing
+# here sorts or ranks: lib/reports.loup does that once all input is in.
 
 from .clf import (Entry, second_index, minute_index, minute_label);
 
@@ -93,11 +103,15 @@ pub class Stats {
             this.last = e.stamp.text;
         }
 
+        # A Tally is a struct, a value: read it (or start an empty one),
+        # count the entry in, and store the new value back.
         this.paths[e.path] = counted(this.paths.get(e.path) ?? empty_tally(), e);
         this.clients[e.host] = counted(this.clients.get(e.host) ?? empty_tally(), e);
         this.statuses[e.status] = (this.statuses.get(e.status) ?? 0) + 1;
         this.hours[e.stamp.hour] = counted(this.hours[e.stamp.hour], e);
 
+        # Minutes are keyed by their index since 1970, so the bursts report
+        # can tell consecutive minutes apart from gaps, across midnight too.
         let m = minute_index(e.stamp);
         var minute = this.minutes.get(m) ?? Minute(label = minute_label(e.stamp), requests = 0, errors = 0, error_paths = {});
         minute.requests += 1;

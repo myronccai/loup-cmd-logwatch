@@ -1,7 +1,17 @@
 @mode(host.dual)
 
-# Turns the counters into report tables. A table is plain data (column
-# names and typed cells), so the text, CSV and JSON renderers share it.
+# Report building: turns the counters into report tables. A table is plain
+# data (column names and typed cells), so the text, CSV and JSON renderers
+# share it.
+#
+# Runtime: host.dual, but only ever interpreted here: bin/logwatch.lpscr
+# imports it under `loup run`, and the unit tests under Stage0's test
+# runner (`loup-bootstrap test`). Being host.dual keeps it compilable.
+#
+# Structure: the Cell and Table types and small cell constructors; one
+# builder per report (summary, paths and clients through tally_table,
+# status, hourly, bursts); build_reports, which picks the builders named on
+# the command line, in the order given.
 
 from .stats import (Stats, Tally, Minute);
 
@@ -167,6 +177,8 @@ pub func bursts_table(s: Stats, threshold: int): Table {
     keys.sort(func(a: int, b: int): int { return a - b; });
     var rows: list[list[Cell]] = [];
 
+    # The run being built: `open` says whether there is one, `previous` is
+    # the index of its last minute, and the rest are its running totals.
     var open = false;
     var previous = 0;
     var start = "";
@@ -175,7 +187,10 @@ pub func bursts_table(s: Stats, threshold: int): Table {
     var errors = 0;
     var requests = 0;
     var paths: dict[string, int] = {};
-    # One pass over the minutes plus a sentinel that closes the last run.
+    # One pass over the minutes plus a sentinel that closes the last run. A
+    # hot minute joins the open run only when it directly follows it; any
+    # other minute (cold, after a gap, or the sentinel) first closes the run
+    # into a row.
     for (i in 0..(keys.len() + 1)) {
         let hot = i < keys.len() and s.minutes[keys[i]].errors >= threshold;
         let joins = hot and open and keys[i] == previous + 1;

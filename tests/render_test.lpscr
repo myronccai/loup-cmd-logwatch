@@ -1,5 +1,13 @@
 @mode(host.scripted)
 
+# Unit tests for the renderers (lib/render.loup, lib/render_json.lpscr):
+# number formatting, bars, aligned text tables, CSV quoting, JSON types.
+#
+# Runtime: host.scripted, run by the test runner: `make test` interprets
+# this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
+# test per `func test_*()`. It imports lib/ with relative imports
+# (`from ..lib.render`). It is not part of the program.
+
 from debug.assert import (expect, expectEq);
 from ..lib.reports import (Cell, Table);
 from ..lib.render import (format_tenths, cell_text, bar, table_text, render_text, table_csv, render_csv);

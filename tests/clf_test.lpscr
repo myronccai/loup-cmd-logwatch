@@ -1,5 +1,14 @@
 @mode(host.scripted)
 
+# Unit tests for the log line parser and writer (lib/clf.loup): Common and
+# Combined lines, quoting and escapes, malformed lines, the parser's match
+# cache, date arithmetic, and format_entry round trips.
+#
+# Runtime: host.scripted, run by the test runner: `make test` interprets
+# this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
+# test per `func test_*()`. It imports lib/ with relative imports
+# (`from ..lib.clf`). It is not part of the program.
+
 from debug.assert import (expect, expectEq);
 from ..lib.clf import (ClfParser, Entry, Stamp, path_of, closing_quote, unescape, escape, days_from_civil, minute_index, minute_label, make_stamp, format_entry);
 

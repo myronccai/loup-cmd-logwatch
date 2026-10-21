@@ -1,5 +1,15 @@
 @mode(host.scripted)
 
+# Unit tests for the report tables (lib/reports.loup), built from
+# tests/fixtures/access.log: percentages, top-N ordering, each report, and
+# how the bursts report splits and joins runs of minutes.
+#
+# Runtime: host.scripted, run by the test runner: `make test` interprets
+# this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
+# test per `func test_*()`, from the repository root (the fixture path is
+# relative to it). It imports lib/ with relative imports
+# (`from ..lib.reports`). It is not part of the program.
+
 from debug.assert import (expect, expectEq);
 from ..lib.analyse import (Analyser);
 from ..lib.stats import (Stats, Tally, empty_tally);

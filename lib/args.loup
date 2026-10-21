@@ -6,6 +6,15 @@
 #   Short options may be combined (`-s4`) and take their value attached or
 #   as the next word (`-fjson`, `-f json`); long options take `--name VALUE`
 #   or `--name=VALUE`. Options may follow files; `--` ends the options.
+#
+# Runtime: host.dual, but only ever interpreted here: bin/logwatch.lpscr
+# imports it under `loup run`, and tests/args_test.lpscr under Stage0's
+# test runner (`loup-bootstrap test`). Being host.dual keeps it compilable.
+#
+# Structure: parse_args works in two passes. The first only reads the
+# syntax, turning every word into a file or an (option, value) step; the
+# second applies the steps in order and validates their values. Usage
+# errors come back as Err(message) for the script to print.
 
 from core.string_utils import (isDigits);
 from .reports import (REPORT_NAMES);
@@ -157,6 +166,8 @@ pub func parse_args(argv: list[string]): Result[Options, string] {
         }
     }
 
+    # Apply the steps in order: a repeated option overrides the earlier one
+    # (`-f csv -f json` gives json).
     for (k in 0..names.len()) {
         let name = names[k];
         let value = values[k];

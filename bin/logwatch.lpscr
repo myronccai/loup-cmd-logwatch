@@ -3,9 +3,21 @@
 
 # logwatch: analyse web server access logs in Common or Combined Log Format.
 #
-# This script is the program's top level: it reads the command line and the
-# input, prints, and sets the exit status. The parsing, counting and
-# formatting it calls are the host.dual modules in lib/.
+# Runtime: host.scripted. The program's entry point: the Loup scripted
+# runtime interprets this file from source (`loup run bin/logwatch.lpscr --
+# ARGS`, as `make run`, tests/e2e.sh and CI do; on Linux x86-64 that is the
+# self-hosted driver). Its top-level statements run in order and there is no
+# compile step: a script entry cannot be compiled, so the project has no
+# binary. `make check` type-checks it, with every lib/ module it imports,
+# using Stage0 (`loup-bootstrap check`). Long options must follow `--`:
+# `loup run` drops a `--long` word that comes before it.
+#
+# Structure: this script is the top level, the only code that reads files,
+# prints and sets the exit status. It parses the command line (usage errors
+# exit 2), handles --help and --version, feeds each input to one Analyser,
+# builds the requested report tables, prints them as text, CSV or JSON, and
+# finally reports malformed lines. The parsing, counting and formatting it
+# calls are the modules in lib/.
 
 from io.fs import (isDir);
 from ..lib.appinfo import (APP_NAME, EXIT_OK, EXIT_FAILURE, EXIT_USAGE);
@@ -32,6 +44,9 @@ if (opts.version) {
     exit(EXIT_OK);
 }
 
+# Every input goes into the same Analyser, so the reports cover all files
+# together. A missing file or a directory is reported and skipped; the
+# others are still analysed and the exit status becomes 1.
 let analyser = Analyser(if (opts.include_4xx) { 400 } else { 500 });
 var status = EXIT_OK;
 var inputs = 0;
@@ -56,6 +71,7 @@ for (file in opts.files) {
     }
     inputs += 1;
 }
+# No input was read: print no reports, only the errors above.
 if (inputs == 0) {
     exit(status);
 }
@@ -69,6 +85,8 @@ if (opts.format == "json") {
     print(render_text(tables));
 }
 
+# Malformed lines never stop the analysis. By default they cost one summary
+# line on stderr; --strict lists each one and turns the status into 1.
 let problems = analyser.problems;
 if (problems.len() > 0 and opts.strict) {
     for (problem in problems) {

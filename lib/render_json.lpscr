@@ -2,9 +2,12 @@
 
 # JSON output of report tables.
 #
-# The one lib module that is host.scripted: a JSON document is built from
-# `Any` values, which host.dual accepts but flags with a W_ANY_IN_AOT_MODE
-# warning on every `loup run`. A script module uses `Any` freely.
+# Runtime: host.scripted. A module of the script bin/logwatch.lpscr,
+# interpreted with it by `loup run`; the unit tests import it under Stage0's
+# test runner (`loup-bootstrap test`). It is the one lib module that is
+# host.scripted: a JSON document is built from `Any` values, which host.dual
+# accepts but flags with a W_ANY_IN_AOT_MODE warning on every `loup run`. A
+# script module uses `Any` and the full standard library freely.
 
 from system.json import (stringifyIndented);
 from .reports import (Cell, Table);

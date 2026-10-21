@@ -1,9 +1,21 @@
 @mode(host.dual)
 
-# Common Log Format (CLF) and Combined Log Format:
+# Parser and writer for access log lines in Common Log Format (CLF) and
+# Combined Log Format:
 #
 #   HOST IDENT USER [DD/Mon/YYYY:HH:MM:SS +ZZZZ] "REQUEST" STATUS BYTES
 #   ... the same ... "REFERER" "USER-AGENT"
+#
+# Runtime: host.dual, but only ever interpreted here: lib/analyse.loup and
+# lib/sample.loup bring it into bin/logwatch.lpscr and bin/loggen.lpscr
+# under `loup run`, and the unit tests run it under Stage0's test runner
+# (`loup-bootstrap test`). Being host.dual keeps it compilable.
+#
+# Structure: the record types (Stamp, Request, Entry); ClfParser, which
+# cuts a line into fields left to right; then the field helpers (quotes
+# and escapes), the date arithmetic the reports group by, and the writer
+# (make_stamp, format_entry) that loggen uses, so both programs agree on
+# the format.
 #
 # A line is cut into fields with plain string searches. The two fields that
 # have a grammar of their own, the timestamp and the request line, are
@@ -120,7 +132,8 @@ pub class ClfParser {
         return req;
     }
 
-    # Parses one log line (without its newline).
+    # Parses one log line (without its newline). Each step slices off the
+    # field it read, so `rest` is always the unread end of the line.
     pub modifier func parse(line: string): Result[Entry, string] {
         let host_end = line.index_of(" ");
         if (host_end <= 0) {
@@ -135,6 +148,7 @@ pub class ClfParser {
         let ident = rest.slice(0, ident_end);
         rest = rest.slice(ident_end + 1);
 
+        # USER runs up to ` [`, so a user name with a space still parses.
         let open = rest.index_of(" [");
         if (open <= 0) {
             return Err("missing [timestamp]");
@@ -151,6 +165,7 @@ pub class ClfParser {
         if (!rest.startsWith(" \"")) {
             return Err("missing \"request\"");
         }
+        # A quoted field ends at the first quote that is not escaped (`\"`).
         rest = rest.slice(2);
         let request_end = closing_quote(rest);
         if (request_end < 0) {
@@ -177,6 +192,9 @@ pub class ClfParser {
         let bytes = if (bytes_text == "-") { 0 } else { bytes_text.toInt() };
 
         # Combined format: ` "REFERER" "USER-AGENT"` after the byte count.
+        # Anything after the user agent (some servers append a response
+        # time) is ignored, and so is anything after BYTES that does not
+        # start with a quote.
         rest = rest.slice(1 + status_text.len() + 1 + bytes_text.len());
         var referer = "";
         var agent = "";

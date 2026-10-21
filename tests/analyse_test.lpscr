@@ -1,5 +1,14 @@
 @mode(host.scripted)
 
+# Unit tests for the analyser (lib/analyse.loup) and the counters it fills
+# (lib/stats.loup): totals, tallies, first/last by time, blank and CRLF
+# lines, problems, and error minutes.
+#
+# Runtime: host.scripted, run by the test runner: `make test` interprets
+# this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
+# test per `func test_*()`. It imports lib/ with relative imports
+# (`from ..lib.analyse`). It is not part of the program.
+
 from debug.assert import (expect, expectEq);
 from ..lib.analyse import (Analyser);
 from ..lib.stats import (Stats, Tally, empty_tally);

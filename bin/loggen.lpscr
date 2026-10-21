@@ -6,6 +6,13 @@
 # writes, logwatch can read.
 #
 #   loup run bin/loggen.lpscr -n 5000 -s 7 | loup run bin/logwatch.lpscr
+#
+# Runtime: host.scripted. A second entry script, interpreted from source by
+# `loup run bin/loggen.lpscr -- ARGS` (`make gen`; tests/e2e.sh runs it and
+# feeds what it writes to logwatch). Its top-level statements run in order
+# and there is no compile step or binary; `make check` type-checks it with
+# Stage0. The generator itself is lib/sample.loup; this file only handles
+# the command line and prints the lines.
 
 from ..lib.appinfo import (APP_VERSION, EXIT_OK, EXIT_USAGE);
 from ..lib.sample import (GenOptions, generate, parse_gen_args);
